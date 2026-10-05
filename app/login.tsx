@@ -1,0 +1,63 @@
+import { Redirect } from 'expo-router';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+
+import { useAuth } from '@/features/auth/AuthProvider';
+import { useGoogleSignIn } from '@/features/auth/useGoogleSignIn';
+import { colors } from '@/theme/tokens';
+
+export default function LoginScreen() {
+  const { user, loading, configured } = useAuth();
+  const google = useGoogleSignIn();
+
+  if (loading) {
+    return (
+      <View className="flex-1 items-center justify-center bg-background">
+        <ActivityIndicator color={colors.accent} />
+      </View>
+    );
+  }
+
+  if (user) {
+    return <Redirect href="/(tabs)" />;
+  }
+
+  return (
+    <View className="flex-1 justify-center bg-background px-lg">
+      <Text className="text-4xl font-bold text-ink">FuelLedger</Text>
+      <Text className="mt-sm text-base text-muted">
+        Manage shared fuel cards without the spreadsheet.
+      </Text>
+
+      {!configured ? (
+        <Text className="mt-xl text-base" style={{ color: colors.offline }}>
+          Add Firebase keys to `.env` before signing in.
+        </Text>
+      ) : null}
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Continue with Google"
+        className="mt-xl items-center rounded-lg bg-ink px-md py-md"
+        disabled={!google.ready || google.busy}
+        onPress={() => {
+          void google.promptAsync();
+        }}>
+        <Text className="text-base font-semibold text-background">
+          {google.busy ? 'Signing in…' : 'Continue with Google'}
+        </Text>
+      </Pressable>
+
+      {!google.ready && configured ? (
+        <Text className="mt-md text-sm text-muted">
+          Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (and iOS/Android client IDs for native builds).
+        </Text>
+      ) : null}
+
+      {google.error ? (
+        <Text className="mt-md text-sm" style={{ color: colors.danger }}>
+          {google.error}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
