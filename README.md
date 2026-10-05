@@ -27,6 +27,12 @@ Fill `EXPO_PUBLIC_FIREBASE_*` and Google client IDs from Firebase / Google Cloud
 
 Also: `npm run ios`, `npm run android`, `npm run web`.
 
+## CI
+
+Pull requests run `.github/workflows/ci.yml` on Node **22.13** (Expo SDK 57 minimum): `npm ci`, lint, typecheck, app unit tests, functions unit tests, and Firestore rules tests (Temurin JDK 21 + Firebase emulator).
+
+Mark the **Lint, typecheck, tests** check as required in GitHub branch protection when ready.
+
 ## Firebase emulators (rules tests)
 
 Rules tests need **JDK 21+** (e.g. Homebrew `openjdk@21`) and the Firebase CLI.
