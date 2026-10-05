@@ -277,5 +277,82 @@ await assertFails(
 
 await assertSucceeds(getDoc(doc(member.firestore(), 'organizations/org1/settlements/s4')));
 
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/adjustments/a1'), {
+    cardId: 'card1',
+    amount: 10000,
+    reason: 'Opening balance',
+    kind: 'OPENING',
+    createdBy: 'owner1',
+    occurredAt: '2026-10-05T00:00:00.000Z',
+  }),
+);
+
+await assertSucceeds(getDoc(doc(member.firestore(), 'organizations/org1/adjustments/a1')));
+
+await assertFails(
+  setDoc(doc(member.firestore(), 'organizations/org1/adjustments/a2'), {
+    cardId: 'card1',
+    amount: 500,
+    reason: 'Member correction',
+    kind: 'CORRECTION',
+    createdBy: 'member1',
+    occurredAt: '2026-10-05T00:00:00.000Z',
+  }),
+);
+
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/adjustments/a3'), {
+    cardId: 'card1',
+    amount: 800,
+    reason: 'Reverse fuel',
+    kind: 'REVERSAL',
+    linkedTxId: 't1',
+    createdBy: 'owner1',
+    occurredAt: '2026-10-05T14:00:00.000Z',
+  }),
+);
+
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/adjustments/a4'), {
+    cardId: 'card1',
+    amount: -5000,
+    reason: 'Reverse recharge',
+    kind: 'REVERSAL',
+    linkedTxId: 'r1',
+    createdBy: 'owner1',
+    occurredAt: '2026-10-05T15:00:00.000Z',
+  }),
+);
+
+await assertFails(
+  setDoc(doc(owner.firestore(), 'organizations/org1/adjustments/a5'), {
+    cardId: 'card1',
+    amount: -100,
+    reason: 'Bad opening',
+    kind: 'OPENING',
+    createdBy: 'owner1',
+    occurredAt: '2026-10-05T00:00:00.000Z',
+  }),
+);
+
+await assertFails(
+  updateDoc(doc(owner.firestore(), 'organizations/org1/adjustments/a1'), {
+    amount: 1,
+  }),
+);
+
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/adjustments/a6'), {
+    cardId: 'card2',
+    amount: 200,
+    reason: 'Other card',
+    kind: 'CORRECTION',
+    createdBy: 'owner1',
+    occurredAt: '2026-10-05T16:00:00.000Z',
+  }),
+);
+await assertFails(getDoc(doc(member.firestore(), 'organizations/org1/adjustments/a6')));
+
 await env.cleanup();
 console.log('firestore rules tests ok');

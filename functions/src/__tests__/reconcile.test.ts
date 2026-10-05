@@ -32,4 +32,19 @@ describe('reconcileCardBalance', () => {
     expect(result.fuels[1]?.requiresReview).toBe(true);
     expect(result.serverBalanceSnapshot).toBe(2000);
   });
+
+  it('includes opening, recharge, and signed adjustments in credit total', () => {
+    const result = reconcileCardBalance(
+      [
+        { id: 'o1', amount: 10000, kind: 'OPENING' },
+        { id: 'r1', amount: 2000, kind: 'RECHARGE' },
+        { id: 'a1', amount: 1500, kind: 'ADJUSTMENT' },
+        { id: 'a2', amount: -500, kind: 'ADJUSTMENT' },
+      ],
+      [{ id: 't1', amount: 4000, occurredAt: '2026-10-01T10:00:00.000Z' }],
+    );
+
+    expect(result.fuels[0]?.syncStatus).toBe('SYNCED');
+    expect(result.serverBalanceSnapshot).toBe(9000);
+  });
 });
