@@ -29,6 +29,33 @@ service cloud.firestore {
       return isActiveMember(orgId) && memberDoc(orgId).data.role == 'owner';
     }
 
+    function assignedCardIds(orgId) {
+      return memberDoc(orgId).data.get('assignedCardIds', []);
+    }
+
+    function isAssignedCard(orgId, cardId) {
+      return isActiveMember(orgId) && cardId in assignedCardIds(orgId);
+    }
+
+    function pinRequestPath(orgId, cardId) {
+      return /databases/$(database)/documents/organizations/$(orgId)/pinRequests/$(cardId + '_' + uid());
+    }
+
+    function hasApprovedPinReveal(orgId, cardId) {
+      return exists(pinRequestPath(orgId, cardId))
+        && get(pinRequestPath(orgId, cardId)).data.status == 'approved'
+        && get(pinRequestPath(orgId, cardId)).data.expiresAt is timestamp
+        && get(pinRequestPath(orgId, cardId)).data.expiresAt > request.time;
+    }
+
+    function cardHasNoPinFields() {
+      return !request.resource.data.keys().hasAny(['pin', 'pinPlainIsolated', 'pinEnc']);
+    }
+
+    function pinRequestHasNoSecret() {
+      return !request.resource.data.keys().hasAny(['pin', 'pinPlainIsolated', 'pinEnc', 'value']);
+    }
+
     function isOrgOwnerCreate() {
       return signedIn()
         && request.resource.data.ownerId == uid()
@@ -107,10 +134,28 @@ service cloud.firestore {
         allow create: if isOwner(orgId)
           && request.resource.data.name is string
           && request.resource.data.last4 is string
-          && request.resource.data.status in ['active', 'inactive'];
+          && request.resource.data.status in ['active', 'inactive']
+          && cardHasNoPinFields();
         allow update: if isOwner(orgId)
-          && request.resource.data.status in ['active', 'inactive'];
+          && request.resource.data.status in ['active', 'inactive']
+          && cardHasNoPinFields();
         allow delete: if false;
+
+        // v1 plaintext PIN; isolated from card reads. Phase 2: encrypted/KMS.
+        match /secrets/{secretId} {
+          allow read: if secretId == 'pin'
+            && (
+              isOwner(orgId)
+              || (isAssignedCard(orgId, cardId) && hasApprovedPinReveal(orgId, cardId))
+            );
+          allow create, update: if isOwner(orgId)
+            && secretId == 'pin'
+            && request.resource.data.keys().hasOnly(['value', 'updatedAt'])
+            && request.resource.data.value is string
+            && request.resource.data.value.size() >= 4
+            && request.resource.data.value.size() <= 12;
+          allow delete: if isOwner(orgId) && secretId == 'pin';
+        }
       }
 
       match /transactions/{docId} {
@@ -228,13 +273,67 @@ service cloud.firestore {
       }
 
       match /pinRequests/{docId} {
-        allow read: if isActiveMember(orgId);
-        allow create, update, delete: if false;
+        allow read: if isOwner(orgId)
+          || (isActiveMember(orgId) && resource.data.requestedBy == uid());
+
+        allow create: if isActiveMember(orgId)
+          && !isOwner(orgId)
+          && request.resource.data.requestedBy == uid()
+          && request.resource.data.cardId is string
+          && request.resource.data.cardId in assignedCardIds(orgId)
+          && docId == request.resource.data.cardId + '_' + uid()
+          && request.resource.data.status == 'pending'
+          && pinRequestHasNoSecret()
+          && request.resource.data.keys()
+            .hasOnly(['cardId', 'requestedBy', 'status', 'createdAt', 'updatedAt']);
+
+        allow update: if isOwner(orgId)
+          && pinRequestHasNoSecret()
+          && resource.data.cardId == request.resource.data.cardId
+          && resource.data.requestedBy == request.resource.data.requestedBy
+          && (
+            (
+              resource.data.status == 'pending'
+              && request.resource.data.status in ['approved', 'rejected']
+              && request.resource.data.resolvedBy == uid()
+              && (
+                (
+                  request.resource.data.status == 'approved'
+                  && request.resource.data.expiresAt is timestamp
+                )
+                || request.resource.data.status == 'rejected'
+              )
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['status', 'resolvedBy', 'resolvedAt', 'expiresAt', 'updatedAt', 'sharedAt'])
+            )
+            || (
+              resource.data.status in ['pending', 'approved']
+              && request.resource.data.status == 'approved'
+              && request.resource.data.resolvedBy == uid()
+              && request.resource.data.expiresAt is timestamp
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['status', 'resolvedBy', 'resolvedAt', 'expiresAt', 'updatedAt', 'sharedAt'])
+            )
+          );
+
+        allow delete: if false;
       }
 
       match /auditLogs/{docId} {
         allow read: if isOwner(orgId);
-        allow create, update, delete: if false;
+        allow create: if isActiveMember(orgId)
+          && request.resource.data.actorId == uid()
+          && request.resource.data.action in [
+            'PIN_REQUEST', 'PIN_APPROVE', 'PIN_REJECT', 'PIN_SHARE', 'PIN_SET'
+          ]
+          && request.resource.data.entityType == 'pinRequest'
+          && request.resource.data.entityId is string
+          && request.resource.data.metadata is map
+          && !request.resource.data.metadata.keys()
+            .hasAny(['pin', 'pinPlainIsolated', 'pinEnc', 'value'])
+          && request.resource.data.keys()
+            .hasOnly(['actorId', 'action', 'entityType', 'entityId', 'metadata', 'createdAt']);
+        allow update, delete: if false;
       }
     }
 

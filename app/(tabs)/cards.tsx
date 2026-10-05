@@ -27,6 +27,18 @@ import {
 } from '@/features/cards/cardService';
 import { useOrg } from '@/features/org/OrgProvider';
 import {
+  getCardPin,
+  getPinRequestForCard,
+  isPinRevealActive,
+  listMyPinRequests,
+  listPendingPinRequests,
+  requestCardPin,
+  resolvePinRequest,
+  setCardPin,
+  sharePinAccess,
+  type PinRequestDoc,
+} from '@/features/pin/pinService';
+import {
   createRecharge,
   listRechargesForCard,
   type RechargeDoc,
@@ -66,6 +78,14 @@ export default function CardsScreen() {
   const [hasOpening, setHasOpening] = useState(false);
   const [openingOpen, setOpeningOpen] = useState(false);
   const [openingOnlyText, setOpeningOnlyText] = useState('');
+  const [pinText, setPinText] = useState('');
+  const [pendingPins, setPendingPins] = useState<PinRequestDoc[]>([]);
+  const [myPins, setMyPins] = useState<PinRequestDoc[]>([]);
+  const [revealOpen, setRevealOpen] = useState(false);
+  const [revealCard, setRevealCard] = useState<FuelCardDoc | null>(null);
+  const [revealPin, setRevealPin] = useState<string | null>(null);
+  const [resolveOpen, setResolveOpen] = useState(false);
+  const [resolveTarget, setResolveTarget] = useState<PinRequestDoc | null>(null);
 
   useEffect(() => {
     if (!orgReady) {
@@ -94,6 +114,13 @@ export default function CardsScreen() {
           }
           next.sort((a, b) => a.name.localeCompare(b.name));
           setCards(next);
+          if (member.role === 'owner') {
+            setPendingPins(await listPendingPinRequests(orgId));
+            setMyPins([]);
+          } else if (user) {
+            setMyPins(await listMyPinRequests(orgId, user.uid));
+            setPendingPins([]);
+          }
           setError(null);
         } catch (err) {
           if (!cancelled) {
@@ -111,12 +138,95 @@ export default function CardsScreen() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [orgReady, orgId, member, reloadKey]);
+  }, [orgReady, orgId, member, reloadKey, user]);
 
   const reload = useCallback(() => {
     setLoading(true);
     setReloadKey((value) => value + 1);
   }, []);
+
+  function myRequestFor(cardId: string) {
+    return myPins.find((item) => item.cardId === cardId) ?? null;
+  }
+
+  async function handleRequestPin(card: FuelCardDoc) {
+    if (!orgId || !user) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await requestCardPin(orgId, user.uid, { cardId: card.id });
+      reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'PIN request failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openReveal(card: FuelCardDoc) {
+    if (!orgId || !user) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      if (!isOwner) {
+        const req = await getPinRequestForCard(orgId, card.id, user.uid);
+        if (!req || !isPinRevealActive(req)) {
+          throw new Error('PIN reveal is not available. Request access from the owner.');
+        }
+      }
+      const value = await getCardPin(orgId, card.id);
+      if (!value) {
+        throw new Error('No PIN is set for this card yet.');
+      }
+      setRevealCard(card);
+      setRevealPin(value);
+      setRevealOpen(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not open PIN');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleResolve(status: 'approved' | 'rejected') {
+    if (!orgId || !user || !resolveTarget) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await resolvePinRequest(orgId, resolveTarget.id, user.uid, { status });
+      setResolveOpen(false);
+      setResolveTarget(null);
+      reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not resolve PIN request');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleShare() {
+    if (!orgId || !user || !resolveTarget) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await sharePinAccess(orgId, resolveTarget.id, user.uid);
+      setResolveOpen(false);
+      setResolveTarget(null);
+      reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not share PIN access');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function loadTimeline(card: FuelCardDoc) {
     if (!orgId) {
@@ -165,6 +275,7 @@ export default function CardsScreen() {
     setLast4('');
     setIssuer('');
     setOpeningText('');
+    setPinText('');
     setTimeline([]);
     setReversedIds(new Set());
     setHasOpening(false);
@@ -176,6 +287,7 @@ export default function CardsScreen() {
     setName(card.name);
     setLast4(card.last4);
     setIssuer(card.issuer);
+    setPinText('');
     setFormOpen(true);
     void loadTimeline(card);
   }
@@ -197,6 +309,10 @@ export default function CardsScreen() {
     try {
       if (editing) {
         await updateCard(orgId, editing.id, { name, last4, issuer });
+        const pinRaw = pinText.trim();
+        if (pinRaw) {
+          await setCardPin(orgId, user.uid, editing.id, pinRaw);
+        }
       } else {
         const card = await createCard(orgId, { name, last4, issuer });
         const openingRaw = openingText.trim();
@@ -205,6 +321,10 @@ export default function CardsScreen() {
           if (opening > 0) {
             await createOpeningBalance(orgId, user.uid, card.id, opening);
           }
+        }
+        const pinRaw = pinText.trim();
+        if (pinRaw) {
+          await setCardPin(orgId, user.uid, card.id, pinRaw);
         }
       }
       setFormOpen(false);
@@ -345,7 +465,7 @@ export default function CardsScreen() {
           <Text className="mt-sm text-base text-muted">
             {isOwner
               ? 'Create cards, add recharges, assign on People.'
-              : 'Cards assigned to you.'}
+              : 'Cards assigned to you. Request PIN when needed.'}
           </Text>
         </View>
         {isOwner ? (
@@ -363,6 +483,37 @@ export default function CardsScreen() {
         <Text className="px-md pt-md text-sm" style={{ color: colors.danger }}>
           {error}
         </Text>
+      ) : null}
+
+      {isOwner && pendingPins.length > 0 ? (
+        <View className="px-md pt-md">
+          <Text className="text-sm font-medium uppercase tracking-wide text-muted">
+            PIN requests
+          </Text>
+          {pendingPins.map((item) => {
+            const card = cards.find((c) => c.id === item.cardId);
+            return (
+              <View
+                key={item.id}
+                className="mt-sm rounded-lg border border-border bg-surface px-md py-md">
+                <Text className="text-base font-semibold text-ink">
+                  {card?.name ?? 'Card'} · •••• {card?.last4 ?? '????'}
+                </Text>
+                <Text className="mt-xs text-sm text-muted">Pending member request</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Review PIN request"
+                  className="mt-md self-start rounded-lg bg-accent px-md py-sm"
+                  onPress={() => {
+                    setResolveTarget(item);
+                    setResolveOpen(true);
+                  }}>
+                  <Text className="text-sm font-semibold text-background">Review</Text>
+                </Pressable>
+              </View>
+            );
+          })}
+        </View>
       ) : null}
 
       {loading ? (
@@ -414,6 +565,50 @@ export default function CardsScreen() {
                   <Text className="text-sm font-medium text-ink">Add recharge</Text>
                 </Pressable>
               ) : null}
+              {!isOwner && item.status === 'active' ? (
+                <View className="mt-md flex-row flex-wrap" style={{ gap: 8 }}>
+                  {(() => {
+                    const req = myRequestFor(item.id);
+                    if (req && isPinRevealActive(req)) {
+                      return (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`View PIN for ${item.name}`}
+                          className="rounded-lg bg-ink px-md py-sm"
+                          disabled={busy}
+                          onPress={() => void openReveal(item)}>
+                          <Text className="text-sm font-medium text-background">View PIN</Text>
+                        </Pressable>
+                      );
+                    }
+                    if (req?.status === 'pending') {
+                      return (
+                        <Text className="text-sm text-muted">PIN request pending</Text>
+                      );
+                    }
+                    return (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Request PIN for ${item.name}`}
+                        className="rounded-lg border border-border px-md py-sm"
+                        disabled={busy}
+                        onPress={() => void handleRequestPin(item)}>
+                        <Text className="text-sm font-medium text-ink">Request PIN</Text>
+                      </Pressable>
+                    );
+                  })()}
+                </View>
+              ) : null}
+              {isOwner && item.hasPin ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`View PIN for ${item.name}`}
+                  className="mt-md self-start rounded-lg border border-border px-md py-sm"
+                  disabled={busy}
+                  onPress={() => void openReveal(item)}>
+                  <Text className="text-sm font-medium text-ink">View PIN</Text>
+                </Pressable>
+              ) : null}
             </View>
           )}
         />
@@ -447,6 +642,16 @@ export default function CardsScreen() {
                   value={issuer}
                   onChangeText={setIssuer}
                   placeholder="Issuer (optional)"
+                  placeholderTextColor={colors.muted}
+                  className="mt-md rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
+                />
+                <TextInput
+                  value={pinText}
+                  onChangeText={setPinText}
+                  keyboardType="number-pad"
+                  maxLength={12}
+                  secureTextEntry
+                  placeholder={editing?.hasPin ? 'New PIN (optional)' : 'PIN (optional)'}
                   placeholderTextColor={colors.muted}
                   className="mt-md rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
                 />
@@ -663,6 +868,96 @@ export default function CardsScreen() {
               className="mt-md items-center py-md"
               onPress={() => setOpeningOpen(false)}>
               <Text className="text-base text-muted">Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={resolveOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setResolveOpen(false)}>
+        <View className="flex-1 justify-end bg-black/40">
+          <View className="rounded-t-2xl bg-background px-md pb-xl pt-lg">
+            <Text className="text-xl font-semibold text-ink">PIN request</Text>
+            <Text className="mt-sm text-base text-muted">
+              Approve to share a time-limited PIN view. Reject to deny. Share extends access.
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Approve PIN request"
+              className="mt-lg items-center rounded-lg bg-ink px-md py-md"
+              disabled={busy}
+              onPress={() => void handleResolve('approved')}>
+              <Text className="text-base font-semibold text-background">
+                {busy ? 'Working…' : 'Approve and share'}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Share PIN access"
+              className="mt-md items-center rounded-lg border border-border px-md py-md"
+              disabled={busy}
+              onPress={() => void handleShare()}>
+              <Text className="text-base font-semibold text-ink">Share access</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Reject PIN request"
+              className="mt-md items-center rounded-lg border border-border px-md py-md"
+              disabled={busy}
+              onPress={() => void handleResolve('rejected')}>
+              <Text className="text-base font-semibold" style={{ color: colors.danger }}>
+                Reject
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close PIN request"
+              className="mt-md items-center py-md"
+              onPress={() => {
+                setResolveOpen(false);
+                setResolveTarget(null);
+              }}>
+              <Text className="text-base text-muted">Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={revealOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => {
+          setRevealOpen(false);
+          setRevealPin(null);
+          setRevealCard(null);
+        }}>
+        <View className="flex-1 justify-end bg-black/40">
+          <View className="rounded-t-2xl bg-background px-md pb-xl pt-lg">
+            <Text className="text-xl font-semibold text-ink">
+              Card PIN{revealCard ? ` · ${revealCard.name}` : ''}
+            </Text>
+            <Text className="mt-sm text-base text-muted">
+              Shown briefly. Do not screenshot or share outside the fuel stop.
+            </Text>
+            <Text
+              className="mt-lg text-center text-4xl font-bold tracking-widest text-ink"
+              accessibilityLabel="Card PIN value">
+              {revealPin ?? '----'}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Hide PIN"
+              className="mt-xl items-center rounded-lg bg-ink px-md py-md"
+              onPress={() => {
+                setRevealOpen(false);
+                setRevealPin(null);
+                setRevealCard(null);
+              }}>
+              <Text className="text-base font-semibold text-background">Hide PIN</Text>
             </Pressable>
           </View>
         </View>

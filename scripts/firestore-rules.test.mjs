@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { setDoc, doc, getDoc, collection, addDoc, updateDoc } from 'firebase/firestore';
+import { setDoc, doc, getDoc, collection, addDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import {
   assertFails,
   assertSucceeds,
@@ -413,6 +413,110 @@ await assertFails(
     amount: 1,
   }),
 );
+
+await assertFails(
+  updateDoc(doc(owner.firestore(), 'organizations/org1/cards/card1'), {
+    pin: '1234',
+  }),
+);
+
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/cards/card1/secrets/pin'), {
+    value: '4321',
+    updatedAt: Timestamp.now(),
+  }),
+);
+
+await assertSucceeds(getDoc(doc(owner.firestore(), 'organizations/org1/cards/card1/secrets/pin')));
+await assertFails(getDoc(doc(member.firestore(), 'organizations/org1/cards/card1/secrets/pin')));
+
+await assertFails(
+  setDoc(doc(member.firestore(), 'organizations/org1/pinRequests/card1_member1'), {
+    cardId: 'card1',
+    requestedBy: 'member1',
+    status: 'pending',
+    pin: '4321',
+  }),
+);
+
+await assertSucceeds(
+  setDoc(doc(member.firestore(), 'organizations/org1/pinRequests/card1_member1'), {
+    cardId: 'card1',
+    requestedBy: 'member1',
+    status: 'pending',
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  }),
+);
+
+await assertFails(
+  setDoc(doc(member.firestore(), 'organizations/org1/pinRequests/card2_member1'), {
+    cardId: 'card2',
+    requestedBy: 'member1',
+    status: 'pending',
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  }),
+);
+
+await assertFails(
+  updateDoc(doc(member.firestore(), 'organizations/org1/pinRequests/card1_member1'), {
+    status: 'approved',
+    resolvedBy: 'member1',
+    resolvedAt: Timestamp.now(),
+    expiresAt: Timestamp.fromMillis(Date.now() + 60_000),
+    updatedAt: Timestamp.now(),
+  }),
+);
+
+await assertSucceeds(
+  updateDoc(doc(owner.firestore(), 'organizations/org1/pinRequests/card1_member1'), {
+    status: 'approved',
+    resolvedBy: 'owner1',
+    resolvedAt: Timestamp.now(),
+    expiresAt: Timestamp.fromMillis(Date.now() + 60_000),
+    updatedAt: Timestamp.now(),
+  }),
+);
+
+await assertSucceeds(getDoc(doc(member.firestore(), 'organizations/org1/cards/card1/secrets/pin')));
+
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/auditLogs/pin1'), {
+    actorId: 'owner1',
+    action: 'PIN_APPROVE',
+    entityType: 'pinRequest',
+    entityId: 'card1_member1',
+    metadata: { cardId: 'card1', requestedBy: 'member1', status: 'approved' },
+    createdAt: Timestamp.now(),
+  }),
+);
+
+await assertFails(
+  setDoc(doc(owner.firestore(), 'organizations/org1/auditLogs/pin2'), {
+    actorId: 'owner1',
+    action: 'PIN_APPROVE',
+    entityType: 'pinRequest',
+    entityId: 'card1_member1',
+    metadata: { pin: '4321' },
+    createdAt: Timestamp.now(),
+  }),
+);
+
+await env.withSecurityRulesDisabled(async (context) => {
+  const db = context.firestore();
+  await setDoc(doc(db, 'organizations/org1/pinRequests/card1_member1'), {
+    cardId: 'card1',
+    requestedBy: 'member1',
+    status: 'approved',
+    resolvedBy: 'owner1',
+    expiresAt: Timestamp.fromMillis(Date.now() - 60_000),
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  });
+});
+
+await assertFails(getDoc(doc(member.firestore(), 'organizations/org1/cards/card1/secrets/pin')));
 
 await env.cleanup();
 console.log('firestore rules tests ok');

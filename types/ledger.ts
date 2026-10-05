@@ -72,8 +72,18 @@ export type PinRequest = {
   status: PinRequestStatus;
   resolvedBy?: string;
   resolvedAt?: unknown;
+  expiresAt?: unknown;
+  sharedAt?: unknown;
   createdAt?: unknown;
+  updatedAt?: unknown;
 };
+
+export type PinAuditAction =
+  | 'PIN_REQUEST'
+  | 'PIN_APPROVE'
+  | 'PIN_REJECT'
+  | 'PIN_SHARE'
+  | 'PIN_SET';
 
 export type LedgerFuelEvent = {
   kind: 'FUEL';
