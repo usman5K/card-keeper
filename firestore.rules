@@ -135,7 +135,23 @@ service cloud.firestore {
               && request.resource.data.cardId in memberDoc(orgId).data.get('assignedCardIds', [])
             )
           );
-        allow update, delete: if false;
+        allow update: if isOwner(orgId)
+          && resource.data.syncStatus == 'CONFLICT'
+          && resource.data.requiresReview == true
+          && request.resource.data.requiresReview == false
+          && request.resource.data.syncStatus == 'CONFLICT'
+          && request.resource.data.type == resource.data.type
+          && request.resource.data.amount == resource.data.amount
+          && request.resource.data.cardId == resource.data.cardId
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.station == resource.data.station
+          && request.resource.data.area == resource.data.area
+          && request.resource.data.reviewedBy == uid()
+          && request.resource.data.reviewAction in ['acknowledge', 'reverse', 'adjust']
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['requiresReview', 'reviewedBy', 'reviewedAt', 'reviewAction']);
+        allow delete: if false;
       }
 
       match /recharges/{docId} {

@@ -354,5 +354,65 @@ await assertSucceeds(
 );
 await assertFails(getDoc(doc(member.firestore(), 'organizations/org1/adjustments/a6')));
 
+await env.withSecurityRulesDisabled(async (context) => {
+  const db = context.firestore();
+  await setDoc(doc(db, 'organizations/org1/transactions/conflict1'), {
+    type: 'FUEL',
+    cardId: 'card1',
+    userId: 'member1',
+    createdBy: 'member1',
+    amount: 5000,
+    station: 'PSO',
+    area: 'Gulberg',
+    syncStatus: 'CONFLICT',
+    requiresReview: true,
+    occurredAt: '2026-10-05T18:00:00.000Z',
+  });
+});
+
+await assertSucceeds(
+  updateDoc(doc(owner.firestore(), 'organizations/org1/transactions/conflict1'), {
+    requiresReview: false,
+    reviewedBy: 'owner1',
+    reviewedAt: '2026-10-05T19:00:00.000Z',
+    reviewAction: 'acknowledge',
+  }),
+);
+
+await assertFails(
+  updateDoc(doc(member.firestore(), 'organizations/org1/transactions/t1'), {
+    requiresReview: false,
+    reviewedBy: 'member1',
+    reviewedAt: '2026-10-05T19:00:00.000Z',
+    reviewAction: 'acknowledge',
+  }),
+);
+
+await env.withSecurityRulesDisabled(async (context) => {
+  const db = context.firestore();
+  await setDoc(doc(db, 'organizations/org1/transactions/conflict2'), {
+    type: 'FUEL',
+    cardId: 'card1',
+    userId: 'member1',
+    createdBy: 'member1',
+    amount: 4000,
+    station: 'Shell',
+    area: 'DHA',
+    syncStatus: 'CONFLICT',
+    requiresReview: true,
+    occurredAt: '2026-10-05T20:00:00.000Z',
+  });
+});
+
+await assertFails(
+  updateDoc(doc(owner.firestore(), 'organizations/org1/transactions/conflict2'), {
+    requiresReview: false,
+    reviewedBy: 'owner1',
+    reviewedAt: '2026-10-05T21:00:00.000Z',
+    reviewAction: 'acknowledge',
+    amount: 1,
+  }),
+);
+
 await env.cleanup();
 console.log('firestore rules tests ok');
