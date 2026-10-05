@@ -113,29 +113,33 @@ export async function createOrganization(user: User, name: string) {
 export async function findPendingInvitesForEmail(email: string) {
   const db = dbOrThrow();
   const normalized = normalizeEmail(email);
-  const inviteQuery = query(
-    collectionGroup(db, 'invites'),
-    where('email', '==', normalized),
-    where('status', '==', 'pending'),
-  );
-  const inviteSnap = await getDocs(inviteQuery);
-  const matches: { orgId: string; orgName: string; inviteId: string; invite: OrgInvite }[] = [];
+  try {
+    const inviteQuery = query(
+      collectionGroup(db, 'invites'),
+      where('email', '==', normalized),
+      where('status', '==', 'pending'),
+    );
+    const inviteSnap = await getDocs(inviteQuery);
+    const matches: { orgId: string; orgName: string; inviteId: string; invite: OrgInvite }[] = [];
 
-  for (const inviteDoc of inviteSnap.docs) {
-    const orgRef = inviteDoc.ref.parent.parent;
-    if (!orgRef) {
-      continue;
+    for (const inviteDoc of inviteSnap.docs) {
+      const orgRef = inviteDoc.ref.parent.parent;
+      if (!orgRef) {
+        continue;
+      }
+      const invite = inviteDoc.data() as OrgInvite;
+      matches.push({
+        orgId: orgRef.id,
+        orgName: invite.orgName || 'Workspace',
+        inviteId: inviteDoc.id,
+        invite,
+      });
     }
-    const invite = inviteDoc.data() as OrgInvite;
-    matches.push({
-      orgId: orgRef.id,
-      orgName: invite.orgName || 'Workspace',
-      inviteId: inviteDoc.id,
-      invite,
-    });
-  }
 
-  return matches;
+    return matches;
+  } catch {
+    return [];
+  }
 }
 
 export async function acceptInvite(user: User, orgId: string, inviteId: string) {

@@ -12,7 +12,11 @@ function getNativePersistence() {
   return authModule.getReactNativePersistence(AsyncStorage);
 }
 
-let auth: Auth | null = null;
+type AuthGlobal = typeof globalThis & { __fuelLedgerAuth?: Auth | null };
+
+function authSlot(): AuthGlobal {
+  return globalThis as AuthGlobal;
+}
 
 export function getFirebaseAuth(): Auth | null {
   const app = getFirebaseApp();
@@ -20,22 +24,24 @@ export function getFirebaseAuth(): Auth | null {
     return null;
   }
 
-  if (auth) {
-    return auth;
+  const slot = authSlot();
+  if (slot.__fuelLedgerAuth) {
+    return slot.__fuelLedgerAuth;
   }
 
+  // Web: getAuth includes browser persistence + popup/redirect resolvers.
   if (Platform.OS === 'web') {
-    auth = getAuth(app);
-    return auth;
+    slot.__fuelLedgerAuth = getAuth(app);
+    return slot.__fuelLedgerAuth;
   }
 
   try {
-    auth = initializeAuth(app, {
+    slot.__fuelLedgerAuth = initializeAuth(app, {
       persistence: getNativePersistence() as never,
     });
   } catch {
-    auth = getAuth(app);
+    slot.__fuelLedgerAuth = getAuth(app);
   }
 
-  return auth;
+  return slot.__fuelLedgerAuth;
 }

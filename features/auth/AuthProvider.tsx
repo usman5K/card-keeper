@@ -25,10 +25,29 @@ export function AuthProvider({ children }: PropsWithChildren) {
       return;
     }
 
-    return onAuthStateChanged(auth, (next) => {
+    let cancelled = false;
+    setLoading(true);
+
+    const unsub = onAuthStateChanged(auth, (next) => {
+      if (cancelled) {
+        return;
+      }
       setUser(next);
       setLoading(false);
     });
+
+    void auth.authStateReady().then(() => {
+      if (cancelled) {
+        return;
+      }
+      setUser(auth.currentUser);
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, []);
 
   const value = useMemo<AuthContextValue>(

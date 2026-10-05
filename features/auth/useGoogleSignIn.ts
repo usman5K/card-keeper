@@ -1,3 +1,4 @@
+import * as AuthSession from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
@@ -6,7 +7,7 @@ import { Platform } from 'react-native';
 
 import { getFirebaseAuth } from '@/firebase/auth';
 
-WebBrowser.maybeCompleteAuthSession();
+WebBrowser.maybeCompleteAuthSession({ skipRedirectCheck: true });
 
 function readClientIds() {
   return {
@@ -26,10 +27,21 @@ function missingClientMessage() {
   return 'Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID and add localhost redirect URIs in Google Cloud.';
 }
 
+function authErrorMessage(err: unknown) {
+  if (err && typeof err === 'object' && 'code' in err) {
+    const code = String((err as { code?: string }).code ?? '');
+    if (code === 'auth/unauthorized-domain') {
+      return 'Add this domain under Firebase Auth authorized domains.';
+    }
+  }
+  return err instanceof Error ? err.message : 'Google sign-in failed.';
+}
+
 export function useGoogleSignIn() {
   const clients = useMemo(() => readClientIds(), []);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const redirectUri = useMemo(() => AuthSession.makeRedirectUri(), []);
 
   const platformClientId =
     Platform.OS === 'ios'
@@ -42,6 +54,7 @@ export function useGoogleSignIn() {
     webClientId: clients.webClientId,
     iosClientId: clients.iosClientId || clients.webClientId,
     androidClientId: clients.androidClientId || clients.webClientId,
+    redirectUri,
   });
 
   useEffect(() => {
@@ -75,21 +88,50 @@ export function useGoogleSignIn() {
     }
 
     setBusy(true);
+    setError(null);
     signInWithCredential(auth, GoogleAuthProvider.credential(idToken))
+      .then(async () => {
+        if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.hash) {
+          const path = window.location.pathname || '/';
+          window.history.replaceState({}, document.title, path);
+        }
+      })
       .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : 'Google sign-in failed.';
-        setError(message);
+        setError(authErrorMessage(err));
       })
       .finally(() => {
         setBusy(false);
       });
   }, [response]);
 
+  async function startSignIn() {
+    setError(null);
+    if (Platform.OS === 'web') {
+      if (!request?.url) {
+        setError('Google sign-in is not ready yet.');
+        return;
+      }
+      setBusy(true);
+      // Same-window redirect so Firebase can persist auth (popup storage is unreliable here).
+      window.location.assign(request.url);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await promptAsync();
+    } catch (err: unknown) {
+      setError(authErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return {
     ready: Boolean(request) && Boolean(platformClientId),
     busy,
     error,
-    redirectUri: request?.redirectUri ?? null,
-    promptAsync,
+    redirectUri: request?.redirectUri ?? redirectUri,
+    promptAsync: startSignIn,
   };
 }

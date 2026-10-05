@@ -31,7 +31,7 @@ import { formatPkr, parsePkrInput } from '@/utils/money';
 
 export default function CardsScreen() {
   const { user } = useAuth();
-  const { orgId, member, refresh } = useOrg();
+  const { ready: orgReady, orgId, member, refresh } = useOrg();
   const insets = useSafeAreaInsets();
   const isOwner = member?.role === 'owner';
   const [cards, setCards] = useState<FuelCardDoc[]>([]);
@@ -53,6 +53,13 @@ export default function CardsScreen() {
   const [timelineLoading, setTimelineLoading] = useState(false);
 
   useEffect(() => {
+    if (!orgReady) {
+      const timer = setTimeout(() => {
+        setLoading(true);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+
     if (!orgId || !member) {
       const timer = setTimeout(() => {
         setCards([]);
@@ -63,6 +70,7 @@ export default function CardsScreen() {
 
     let cancelled = false;
     const timer = setTimeout(() => {
+      setLoading(true);
       void (async () => {
         try {
           const next = await listVisibleCards(orgId, member);
@@ -88,7 +96,7 @@ export default function CardsScreen() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [orgId, member, reloadKey]);
+  }, [orgReady, orgId, member, reloadKey]);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -277,25 +285,26 @@ export default function CardsScreen() {
             />
           }
           renderItem={({ item }) => (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`${item.name} ending ${item.last4}`}
-              className="mb-md rounded-lg border border-border bg-surface px-md py-md"
-              onPress={() => openEdit(item)}>
-              <View className="flex-row items-center justify-between">
-                <Text className="text-lg font-semibold text-ink">{item.name}</Text>
-                <Text
-                  className="text-xs font-medium uppercase"
-                  style={{
-                    color: item.status === 'active' ? colors.online : colors.offline,
-                  }}>
-                  {item.status}
+            <View className="mb-md rounded-lg border border-border bg-surface px-md py-md">
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${item.name} ending ${item.last4}`}
+                onPress={() => openEdit(item)}>
+                <View className="flex-row items-center justify-between">
+                  <Text className="text-lg font-semibold text-ink">{item.name}</Text>
+                  <Text
+                    className="text-xs font-medium uppercase"
+                    style={{
+                      color: item.status === 'active' ? colors.online : colors.offline,
+                    }}>
+                    {item.status}
+                  </Text>
+                </View>
+                <Text className="mt-sm text-base text-muted">
+                  •••• {item.last4}
+                  {item.issuer ? ` · ${item.issuer}` : ''}
                 </Text>
-              </View>
-              <Text className="mt-sm text-base text-muted">
-                •••• {item.last4}
-                {item.issuer ? ` · ${item.issuer}` : ''}
-              </Text>
+              </Pressable>
               {isOwner && item.status === 'active' ? (
                 <Pressable
                   accessibilityRole="button"
@@ -305,7 +314,7 @@ export default function CardsScreen() {
                   <Text className="text-sm font-medium text-ink">Add recharge</Text>
                 </Pressable>
               ) : null}
-            </Pressable>
+            </View>
           )}
         />
       )}

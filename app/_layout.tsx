@@ -5,10 +5,12 @@ import { useEffect } from 'react';
 import { ActivityIndicator, Platform, View } from 'react-native';
 import 'react-native-reanimated';
 import '../global.css';
+import '@/features/auth/authSessionBootstrap';
 
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { OrgProvider, useOrg } from '@/features/org/OrgProvider';
+import { getFirebaseAuth } from '@/firebase/auth';
 import { colors } from '@/theme/tokens';
 
 export { ErrorBoundary } from 'expo-router';
@@ -26,37 +28,48 @@ function AuthRedirect() {
   const { ready, orgId } = useOrg();
   const segments = useSegments();
   const router = useRouter();
+  const liveUser = getFirebaseAuth()?.currentUser ?? user;
+  const waiting = loading || (Boolean(liveUser) && !user) || (Boolean(user) && !ready);
 
   useEffect(() => {
-    if (loading || (user && !ready)) {
+    if (waiting) {
+      return;
+    }
+
+    if (
+      Platform.OS === 'web' &&
+      typeof window !== 'undefined' &&
+      (window.location.hash.includes('id_token') || window.location.hash.includes('access_token'))
+    ) {
       return;
     }
 
     const route = segments[0];
     const onLogin = route === 'login';
     const onOnboarding = route === 'onboarding';
+    const signedIn = Boolean(liveUser);
 
-    if (!user && !onLogin) {
+    if (!signedIn && !onLogin) {
       router.replace('/login');
       return;
     }
 
-    if (user && onLogin) {
+    if (signedIn && onLogin) {
       router.replace(orgId ? '/(tabs)' : '/onboarding');
       return;
     }
 
-    if (user && !orgId && !onOnboarding) {
+    if (signedIn && !orgId && !onOnboarding) {
       router.replace('/onboarding');
       return;
     }
 
-    if (user && orgId && onOnboarding) {
+    if (signedIn && orgId && onOnboarding) {
       router.replace('/(tabs)');
     }
-  }, [user, loading, ready, orgId, segments, router]);
+  }, [liveUser, waiting, orgId, segments, router]);
 
-  if (loading || (user && !ready)) {
+  if (waiting) {
     return (
       <View className="absolute inset-0 z-50 items-center justify-center bg-background">
         <ActivityIndicator color={colors.accent} />

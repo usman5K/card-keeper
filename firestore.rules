@@ -170,5 +170,12 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
     }
+
+    // Collection-group invite lookup for onboarding email match.
+    match /{path=**}/invites/{inviteId} {
+      allow read: if signedIn()
+        && resource.data.email == authEmail()
+        && resource.data.status == 'pending';
+    }
   }
 }

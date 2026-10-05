@@ -30,19 +30,25 @@ export async function createRecharge(
   occurredAt: Date = new Date(),
 ) {
   const parsed = rechargeInputSchema.parse(input);
-  const refill: Recharge = {
+  const refill: Record<string, unknown> = {
     cardId: parsed.cardId,
     amount: parsed.amount,
     month: parsed.month ?? toMonthKey(occurredAt),
-    source: parsed.source?.trim() || undefined,
-    notes: parsed.notes?.trim() || undefined,
     createdBy,
     occurredAt: occurredAt.toISOString(),
     createdAt: serverTimestamp(),
   };
+  const source = parsed.source?.trim();
+  const notes = parsed.notes?.trim();
+  if (source) {
+    refill.source = source;
+  }
+  if (notes) {
+    refill.notes = notes;
+  }
 
   const ref = await addDoc(collection(dbOrThrow(), 'organizations', orgId, 'recharges'), refill);
-  return { id: ref.id, ...refill };
+  return { id: ref.id, ...(refill as Recharge) };
 }
 
 export async function listRechargesForCard(orgId: string, cardId: string, limit = 20) {

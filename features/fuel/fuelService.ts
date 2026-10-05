@@ -38,7 +38,7 @@ export async function createFuelTransaction(
   const after =
     before === null ? null : subtractPkr(before, parsed.amount);
 
-  const tx: FuelTransaction = {
+  const tx: Record<string, unknown> = {
     type: 'FUEL',
     cardId: parsed.cardId,
     userId: parsed.userId,
@@ -46,8 +46,6 @@ export async function createFuelTransaction(
     amount: parsed.amount,
     station: parsed.station.trim(),
     area: parsed.area.trim(),
-    city: parsed.city?.trim() || undefined,
-    notes: parsed.notes?.trim() || undefined,
     occurredAt,
     createdAt: serverTimestamp(),
     deviceId,
@@ -58,9 +56,17 @@ export async function createFuelTransaction(
     syncStatus: 'PENDING',
     requiresReview: false,
   };
+  const city = parsed.city?.trim();
+  const notes = parsed.notes?.trim();
+  if (city) {
+    tx.city = city;
+  }
+  if (notes) {
+    tx.notes = notes;
+  }
 
   const ref = await addDoc(collection(dbOrThrow(), 'organizations', orgId, 'transactions'), tx);
-  return { id: ref.id, ...tx };
+  return { id: ref.id, ...(tx as FuelTransaction) };
 }
 
 export async function listRecentFuelTransactions(
