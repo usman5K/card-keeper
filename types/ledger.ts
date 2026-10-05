@@ -78,13 +78,6 @@ export type PinRequest = {
   updatedAt?: unknown;
 };
 
-export type PinAuditAction =
-  | 'PIN_REQUEST'
-  | 'PIN_APPROVE'
-  | 'PIN_REJECT'
-  | 'PIN_SHARE'
-  | 'PIN_SET';
-
 export type LedgerFuelEvent = {
   kind: 'FUEL';
   amount: number;

@@ -324,9 +324,17 @@ service cloud.firestore {
         allow create: if isActiveMember(orgId)
           && request.resource.data.actorId == uid()
           && request.resource.data.action in [
-            'PIN_REQUEST', 'PIN_APPROVE', 'PIN_REJECT', 'PIN_SHARE', 'PIN_SET'
+            'ORG_CREATE', 'MEMBER_INVITE', 'MEMBER_ACTIVATE',
+            'CARD_CREATE', 'CARD_UPDATE', 'CARD_DEACTIVATE',
+            'RECHARGE_CREATE', 'FUEL_CREATE', 'ADJUSTMENT_CREATE',
+            'SETTLEMENT_CREATE', 'SETTLEMENT_CONFIRM',
+            'PIN_REQUEST', 'PIN_APPROVE', 'PIN_REJECT', 'PIN_SHARE', 'PIN_SET',
+            'CONFLICT_ACKNOWLEDGE', 'CONFLICT_REVERSE', 'CONFLICT_ADJUST'
           ]
-          && request.resource.data.entityType == 'pinRequest'
+          && request.resource.data.entityType in [
+            'organization', 'invite', 'member', 'card', 'recharge', 'fuel',
+            'adjustment', 'settlement', 'pinRequest', 'transaction'
+          ]
           && request.resource.data.entityId is string
           && request.resource.data.metadata is map
           && !request.resource.data.metadata.keys()

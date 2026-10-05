@@ -1,4 +1,4 @@
-import { redactSecrets, safeLog } from '@/utils/safeLog';
+import { omitSecrets, redactSecrets, safeLog } from '@/utils/safeLog';
 
 describe('safeLog', () => {
   it('redacts pin and nested secret fields', () => {
@@ -13,6 +13,19 @@ describe('safeLog', () => {
       pin: '[redacted]',
       cardId: 'card1',
       nested: { pinPlainIsolated: '[redacted]', ok: true },
+    });
+  });
+
+  it('omits secret keys for audit metadata', () => {
+    expect(
+      omitSecrets({
+        pin: '1234',
+        cardId: 'c1',
+        nested: { value: 'x', amount: 10 },
+      }),
+    ).toEqual({
+      cardId: 'c1',
+      nested: { amount: 10 },
     });
   });
 

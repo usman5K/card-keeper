@@ -1,3 +1,4 @@
+import type { User } from 'firebase/auth';
 import {
   collection,
   collectionGroup,
@@ -11,8 +12,8 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
-import type { User } from 'firebase/auth';
 
+import { writeAuditLog } from '@/features/audit/auditService';
 import { getFirestoreDb } from '@/firebase/firestore';
 import type { OrgInvite, OrgMember, Organization, UserProfile } from '@/types/org';
 import { normalizeEmail } from '@/utils/email';
@@ -107,6 +108,14 @@ export async function createOrganization(user: User, name: string) {
   );
   await batch.commit();
 
+  await writeAuditLog(orgRef.id, {
+    actorId: user.uid,
+    action: 'ORG_CREATE',
+    entityType: 'organization',
+    entityId: orgRef.id,
+    metadata: { name: trimmed },
+  });
+
   return orgRef.id;
 }
 
@@ -187,6 +196,14 @@ export async function acceptInvite(user: User, orgId: string, inviteId: string) 
     { merge: true },
   );
   await batch.commit();
+
+  await writeAuditLog(orgId, {
+    actorId: user.uid,
+    action: 'MEMBER_ACTIVATE',
+    entityType: 'member',
+    entityId: user.uid,
+    metadata: { inviteId, email },
+  });
 }
 
 export async function inviteMemberByEmail(orgId: string, invitedBy: string, email: string) {
@@ -210,6 +227,13 @@ export async function inviteMemberByEmail(orgId: string, invitedBy: string, emai
     createdAt: serverTimestamp(),
   };
   await setDoc(inviteRef, invite);
+  await writeAuditLog(orgId, {
+    actorId: invitedBy,
+    action: 'MEMBER_INVITE',
+    entityType: 'invite',
+    entityId: inviteRef.id,
+    metadata: { email: normalized },
+  });
   return inviteRef.id;
 }
 

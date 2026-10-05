@@ -11,6 +11,7 @@ import {
   where,
 } from 'firebase/firestore';
 
+import { writeAuditLog } from '@/features/audit/auditService';
 import { getFirestoreDb } from '@/firebase/firestore';
 import type { FuelCard, FuelCardDoc } from '@/types/card';
 import type { OrgMember } from '@/types/org';
@@ -44,6 +45,7 @@ function mapCard(id: string, data: FuelCard): FuelCardDoc {
 
 export async function createCard(
   orgId: string,
+  actorId: string,
   input: { name: string; last4: string; issuer?: string },
 ) {
   const name = input.name.trim();
@@ -67,11 +69,19 @@ export async function createCard(
     updatedAt: serverTimestamp(),
   };
   await setDoc(ref, card);
+  await writeAuditLog(orgId, {
+    actorId,
+    action: 'CARD_CREATE',
+    entityType: 'card',
+    entityId: ref.id,
+    metadata: { name, last4 },
+  });
   return mapCard(ref.id, card);
 }
 
 export async function updateCard(
   orgId: string,
+  actorId: string,
   cardId: string,
   input: { name?: string; last4?: string; issuer?: string; status?: FuelCard['status'] },
 ) {
@@ -97,6 +107,20 @@ export async function updateCard(
     patch.status = input.status;
   }
   await updateDoc(doc(dbOrThrow(), 'organizations', orgId, 'cards', cardId), patch);
+
+  const auditAction =
+    input.status === 'inactive' ? 'CARD_DEACTIVATE' : 'CARD_UPDATE';
+  await writeAuditLog(orgId, {
+    actorId,
+    action: auditAction,
+    entityType: 'card',
+    entityId: cardId,
+    metadata: {
+      ...(input.name !== undefined ? { name: patch.name } : {}),
+      ...(input.last4 !== undefined ? { last4: patch.last4 } : {}),
+      ...(input.status !== undefined ? { status: input.status } : {}),
+    },
+  });
 }
 
 export async function getCard(orgId: string, cardId: string) {

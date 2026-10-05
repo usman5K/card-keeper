@@ -11,6 +11,7 @@ import {
   where,
 } from 'firebase/firestore';
 
+import { writeAuditLog } from '@/features/audit/auditService';
 import {
   confirmSettlementSchema,
   settlementInputSchema,
@@ -70,6 +71,18 @@ export async function createSettlement(
     collection(dbOrThrow(), 'organizations', orgId, 'settlements'),
     settlement,
   );
+  await writeAuditLog(orgId, {
+    actorId: createdBy,
+    action: 'SETTLEMENT_CREATE',
+    entityType: 'settlement',
+    entityId: ref.id,
+    metadata: {
+      userId: parsed.userId,
+      amount: parsed.amount,
+      method: parsed.method,
+      status,
+    },
+  });
   return { id: ref.id, ...(settlement as Settlement) };
 }
 
@@ -92,6 +105,16 @@ export async function confirmSettlement(
     patch.method = parsed.method;
   }
   await updateDoc(ref, patch);
+  await writeAuditLog(orgId, {
+    actorId: confirmedBy,
+    action: 'SETTLEMENT_CONFIRM',
+    entityType: 'settlement',
+    entityId: settlementId,
+    metadata: {
+      ...(parsed.amount !== undefined ? { amount: parsed.amount } : {}),
+      ...(parsed.method !== undefined ? { method: parsed.method } : {}),
+    },
+  });
 }
 
 export async function listSettlementsForUser(orgId: string, userId: string, max = 50) {
