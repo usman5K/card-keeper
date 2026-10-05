@@ -10,7 +10,8 @@ import {
   View,
 } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AmountField } from '@/components/AmountField';
 import { SyncBadge } from '@/components/SyncBadge';
@@ -32,6 +33,8 @@ import { parsePkrInput, formatPkr } from '@/utils/money';
 export default function HomeScreen() {
   const { user } = useAuth();
   const { orgId, orgName, member } = useOrg();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
   const isOwner = member?.role === 'owner';
   const [online, setOnline] = useState(true);
   const [txs, setTxs] = useState<FuelTransactionDoc[]>([]);
@@ -50,7 +53,10 @@ export default function HomeScreen() {
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
-      setOnline(Boolean(state.isConnected && state.isInternetReachable !== false));
+      // Web often leaves isInternetReachable null; treat null as online when connected.
+      const connected = state.isConnected !== false;
+      const reachable = state.isInternetReachable !== false;
+      setOnline(connected && reachable);
     });
     return unsubscribe;
   }, []);
@@ -169,9 +175,9 @@ export default function HomeScreen() {
   }
 
   return (
-    <View className="flex-1 bg-background">
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
-        <View className="px-md pt-lg">
+    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
+      <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 24 }}>
+        <View className="px-md pt-md">
           <View className="flex-row items-center justify-between">
             <SyncBadge status={online ? 'online' : 'offline'} />
             <Link href="/settings" accessibilityLabel="Open settings">
@@ -225,11 +231,23 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
-      <View className="absolute bottom-0 left-0 right-0 border-t border-border bg-background px-md pb-lg pt-md">
+      <View className="border-t border-border bg-background px-md pt-md" style={{ paddingBottom: 12 }}>
+        {cards.length === 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Go to Cards to add a card"
+            className="mb-sm"
+            onPress={() => router.push('/(tabs)/cards')}>
+            <Text className="text-center text-sm text-muted">
+              Add a card on the Cards tab before logging fuel.
+            </Text>
+          </Pressable>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Add Fuel"
           className="items-center rounded-lg bg-ink px-md py-md"
+          style={{ opacity: cards.length === 0 ? 0.45 : 1 }}
           onPress={openSheet}
           disabled={cards.length === 0}>
           <Text className="text-base font-semibold text-background">Add Fuel</Text>
@@ -240,7 +258,7 @@ export default function HomeScreen() {
         <View className="flex-1 justify-end bg-black/40">
           <ScrollView
             className="max-h-[92%] rounded-t-2xl bg-background"
-            contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+            contentContainerStyle={{ padding: 16, paddingBottom: 40 + insets.bottom }}>
             <Text className="text-xl font-semibold text-ink">Add Fuel</Text>
             <View className="mt-lg">
               <AmountField value={amountText} onChangeText={setAmountText} />

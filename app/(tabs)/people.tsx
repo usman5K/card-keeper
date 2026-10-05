@@ -7,6 +7,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/components/EmptyState';
 import { listAllCards } from '@/features/cards/cardService';
@@ -21,6 +22,7 @@ import type { FuelCardDoc } from '@/types/card';
 
 export default function PeopleScreen() {
   const { orgId, orgName, member, inviteEmail, refresh } = useOrg();
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -101,7 +103,7 @@ export default function PeopleScreen() {
   }
 
   return (
-    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ paddingBottom: 40 }}>
+    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ paddingBottom: 40, paddingTop: insets.top }}>
       <View className="px-md pt-lg">
         <Text className="text-sm font-medium uppercase tracking-wide text-muted">Workspace</Text>
         <Text className="mt-sm text-2xl font-bold text-ink">{orgName ?? 'Workspace'}</Text>

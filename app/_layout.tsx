@@ -6,6 +6,7 @@ import { ActivityIndicator, Platform, View } from 'react-native';
 import 'react-native-reanimated';
 import '../global.css';
 
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { OrgProvider, useOrg } from '@/features/org/OrgProvider';
 import { colors } from '@/theme/tokens';
@@ -13,7 +14,7 @@ import { colors } from '@/theme/tokens';
 export { ErrorBoundary } from 'expo-router';
 
 export const unstable_settings = {
-  initialRouteName: '(tabs)',
+  initialRouteName: 'login',
 };
 
 if (Platform.OS !== 'web') {
@@ -90,18 +91,20 @@ export default function RootLayout() {
   }
 
   return (
-    <AuthProvider>
-      <OrgProvider>
-        <View className="flex-1 bg-background">
-          <Stack>
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="login" options={{ headerShown: false }} />
-            <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-            <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-          </Stack>
-          <AuthRedirect />
-        </View>
-      </OrgProvider>
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <OrgProvider>
+          <View className="flex-1 bg-background">
+            <Stack>
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="login" options={{ headerShown: false }} />
+              <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+              <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+            </Stack>
+            <AuthRedirect />
+          </View>
+        </OrgProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }

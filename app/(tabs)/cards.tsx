@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AmountField } from '@/components/AmountField';
 import { EmptyState } from '@/components/EmptyState';
@@ -31,6 +32,7 @@ import { formatPkr, parsePkrInput } from '@/utils/money';
 export default function CardsScreen() {
   const { user } = useAuth();
   const { orgId, member, refresh } = useOrg();
+  const insets = useSafeAreaInsets();
   const isOwner = member?.role === 'owner';
   const [cards, setCards] = useState<FuelCardDoc[]>([]);
   const [loading, setLoading] = useState(true);
@@ -226,7 +228,7 @@ export default function CardsScreen() {
   }
 
   return (
-    <View className="flex-1 bg-background">
+    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <View className="flex-row items-end justify-between px-md pt-md">
         <View className="flex-1 pr-md">
           <Text className="text-sm font-medium uppercase tracking-wide text-muted">

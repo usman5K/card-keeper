@@ -1,5 +1,6 @@
 import { Redirect } from 'expo-router';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/features/auth/AuthProvider';
 import { useGoogleSignIn } from '@/features/auth/useGoogleSignIn';
@@ -8,6 +9,7 @@ import { colors } from '@/theme/tokens';
 export default function LoginScreen() {
   const { user, loading, configured } = useAuth();
   const google = useGoogleSignIn();
+  const insets = useSafeAreaInsets();
 
   if (loading) {
     return (
@@ -22,7 +24,9 @@ export default function LoginScreen() {
   }
 
   return (
-    <View className="flex-1 justify-center bg-background px-lg">
+    <View
+      className="flex-1 justify-center bg-background px-lg"
+      style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
       <Text className="text-4xl font-bold text-ink">FuelLedger</Text>
       <Text className="mt-sm text-base text-muted">
         Manage shared fuel cards without the spreadsheet.
@@ -54,7 +58,7 @@ export default function LoginScreen() {
       ) : null}
 
       {google.redirectUri ? (
-        <Text className="mt-md text-xs text-muted">
+        <Text className="mt-md text-xs text-muted" selectable>
           Redirect URI (add this in Google Cloud if using Web client):{'\n'}
           {google.redirectUri}
         </Text>
