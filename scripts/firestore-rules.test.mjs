@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { setDoc, doc, getDoc, collection, addDoc } from 'firebase/firestore';
+import { setDoc, doc, getDoc, collection, addDoc, updateDoc } from 'firebase/firestore';
 import {
   assertFails,
   assertSucceeds,
@@ -75,6 +75,7 @@ await assertFails(
   setDoc(doc(member.firestore(), 'organizations/org1/cards/card1'), {
     name: 'Hack',
     status: 'active',
+    last4: '9999',
   }),
 );
 
@@ -83,10 +84,38 @@ await assertSucceeds(
     name: 'Meezan',
     status: 'active',
     last4: '1234',
+    issuer: 'Meezan',
+  }),
+);
+
+await assertFails(getDoc(doc(member.firestore(), 'organizations/org1/cards/card1')));
+
+await assertSucceeds(
+  updateDoc(doc(owner.firestore(), 'organizations/org1/members/member1'), {
+    assignedCardIds: ['card1'],
   }),
 );
 
 await assertSucceeds(getDoc(doc(member.firestore(), 'organizations/org1/cards/card1')));
+await assertSucceeds(getDoc(doc(owner.firestore(), 'organizations/org1/cards/card1')));
+
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/cards/card2'), {
+    name: 'Other',
+    status: 'active',
+    last4: '5678',
+    issuer: '',
+  }),
+);
+await assertFails(getDoc(doc(member.firestore(), 'organizations/org1/cards/card2')));
+
+await assertFails(
+  updateDoc(doc(member.firestore(), 'organizations/org1/members/member1'), {
+    assignedCardIds: ['card1', 'card2'],
+    role: 'member',
+    status: 'active',
+  }),
+);
 
 const fresh = env.authenticatedContext('newbie', { email: 'new@example.com' });
 await assertSucceeds(
