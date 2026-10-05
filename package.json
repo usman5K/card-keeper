@@ -10,7 +10,8 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
-    "test:firebase-env": "node scripts/check-firebase-env.mjs"
+    "test:firebase-env": "node scripts/check-firebase-env.mjs",
+    "test:email": "node scripts/check-email.mjs"
   },
   "dependencies": {
     "@expo/ui": "~57.0.21",

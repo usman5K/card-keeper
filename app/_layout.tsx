@@ -7,6 +7,7 @@ import 'react-native-reanimated';
 import '../global.css';
 
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
+import { OrgProvider, useOrg } from '@/features/org/OrgProvider';
 import { colors } from '@/theme/tokens';
 
 export { ErrorBoundary } from 'expo-router';
@@ -19,10 +20,13 @@ SplashScreen.preventAutoHideAsync();
 
 function AuthGate({ children }: PropsWithChildren) {
   const { user, loading } = useAuth();
+  const { ready, orgId } = useOrg();
   const segments = useSegments();
-  const onLogin = segments[0] === 'login';
+  const route = segments[0];
+  const onLogin = route === 'login';
+  const onOnboarding = route === 'onboarding';
 
-  if (loading) {
+  if (loading || (user && !ready)) {
     return (
       <View className="flex-1 items-center justify-center bg-background">
         <ActivityIndicator color={colors.accent} />
@@ -35,6 +39,14 @@ function AuthGate({ children }: PropsWithChildren) {
   }
 
   if (user && onLogin) {
+    return <Redirect href={orgId ? '/(tabs)' : '/onboarding'} />;
+  }
+
+  if (user && !orgId && !onOnboarding) {
+    return <Redirect href="/onboarding" />;
+  }
+
+  if (user && orgId && onOnboarding) {
     return <Redirect href="/(tabs)" />;
   }
 
@@ -62,13 +74,16 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <AuthGate>
-        <Stack>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="login" options={{ headerShown: false }} />
-          <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-        </Stack>
-      </AuthGate>
+      <OrgProvider>
+        <AuthGate>
+          <Stack>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="login" options={{ headerShown: false }} />
+            <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+            <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+          </Stack>
+        </AuthGate>
+      </OrgProvider>
     </AuthProvider>
   );
 }
