@@ -40,6 +40,35 @@ describe('balance projection', () => {
     });
   });
 
+  it('excludes failed fuel and pending opt-out from balance', () => {
+    const result = projectCardBalance([
+      { kind: 'ADJUSTMENT', amount: 5000, adjustmentKind: 'OPENING' },
+      { kind: 'FUEL', amount: 1000, syncStatus: 'SYNCED' },
+      { kind: 'FUEL', amount: 700, syncStatus: 'FAILED' },
+      { kind: 'FUEL', amount: 300, syncStatus: 'PENDING', includeInProjection: false },
+    ]);
+
+    expect(result).toEqual({
+      opening: 5000,
+      recharges: 0,
+      fuel: 1000,
+      adjustments: 0,
+      balance: 4000,
+      pendingFuel: 300,
+    });
+  });
+
+  it('treats empty ledger as zero balance', () => {
+    expect(projectCardBalance([])).toEqual({
+      opening: 0,
+      recharges: 0,
+      fuel: 0,
+      adjustments: 0,
+      balance: 0,
+      pendingFuel: 0,
+    });
+  });
+
   it('projects person outstanding', () => {
     expect(projectOutstanding([1000, 500], [400])).toBe(1100);
   });

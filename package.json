@@ -11,11 +11,12 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "jest",
+    "test:unit": "jest",
     "test:firebase-env": "node scripts/check-firebase-env.mjs",
     "test:email": "node scripts/check-email.mjs",
     "test:rules": "firebase emulators:exec --only firestore \"node scripts/firestore-rules.test.mjs\"",
-    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes",
     "test:functions": "npm --prefix functions test",
+    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes",
     "deploy:functions": "npm --prefix functions run build && firebase deploy --only functions"
   },
   "jest": {

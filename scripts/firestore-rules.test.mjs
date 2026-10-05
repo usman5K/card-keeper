@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { setDoc, doc, getDoc, collection, addDoc, updateDoc, Timestamp } from 'firebase/firestore';
+import {
+  setDoc,
+  doc,
+  getDoc,
+  collection,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  Timestamp,
+} from 'firebase/firestore';
 import {
   assertFails,
   assertSucceeds,
@@ -565,6 +574,220 @@ await env.withSecurityRulesDisabled(async (context) => {
 });
 
 await assertFails(getDoc(doc(member.firestore(), 'organizations/org1/cards/card1/secrets/pin')));
+
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'users/owner1'), {
+    email: 'owner@example.com',
+    displayName: 'Owner',
+  }),
+);
+await assertFails(
+  setDoc(doc(owner.firestore(), 'users/member1'), {
+    email: 'member@example.com',
+  }),
+);
+await assertFails(getDoc(doc(stranger.firestore(), 'users/owner1')));
+
+await assertSucceeds(
+  updateDoc(doc(owner.firestore(), 'organizations/org1'), {
+    name: 'Fleet Updated',
+  }),
+);
+await assertFails(
+  updateDoc(doc(owner.firestore(), 'organizations/org1'), {
+    ownerId: 'member1',
+  }),
+);
+await assertFails(
+  updateDoc(doc(member.firestore(), 'organizations/org1'), {
+    name: 'Hack',
+  }),
+);
+
+await assertSucceeds(
+  updateDoc(doc(member.firestore(), 'organizations/org1/members/member1'), {
+    displayName: 'Member Renamed',
+  }),
+);
+
+await env.withSecurityRulesDisabled(async (context) => {
+  const db = context.firestore();
+  await setDoc(doc(db, 'organizations/org1/members/inactive1'), {
+    role: 'member',
+    status: 'inactive',
+    email: 'inactive@example.com',
+    displayName: 'Inactive',
+    assignedCardIds: ['card1'],
+  });
+  await setDoc(doc(db, 'organizations/org1/invites/inv1'), {
+    email: 'invitee@example.com',
+    invitedBy: 'owner1',
+    status: 'pending',
+    orgName: 'Fleet Updated',
+  });
+});
+
+const inactive = env.authenticatedContext('inactive1', { email: 'inactive@example.com' });
+await assertFails(getDoc(doc(inactive.firestore(), 'organizations/org1')));
+await assertFails(getDoc(doc(inactive.firestore(), 'organizations/org1/cards/card1')));
+
+const invitee = env.authenticatedContext('invitee1', { email: 'invitee@example.com' });
+await assertSucceeds(getDoc(doc(invitee.firestore(), 'organizations/org1/invites/inv1')));
+await assertFails(getDoc(doc(stranger.firestore(), 'organizations/org1/invites/inv1')));
+await assertSucceeds(
+  updateDoc(doc(invitee.firestore(), 'organizations/org1/invites/inv1'), {
+    status: 'accepted',
+    email: 'invitee@example.com',
+  }),
+);
+
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/invites/inv2'), {
+    email: 'another@example.com',
+    invitedBy: 'owner1',
+    status: 'pending',
+    orgName: 'Fleet Updated',
+  }),
+);
+await assertSucceeds(deleteDoc(doc(owner.firestore(), 'organizations/org1/invites/inv2')));
+await assertFails(deleteDoc(doc(member.firestore(), 'organizations/org1/invites/inv1')));
+
+await assertFails(
+  setDoc(doc(member.firestore(), 'organizations/org1/transactions/t4'), {
+    type: 'FUEL',
+    cardId: 'card1',
+    userId: 'owner1',
+    createdBy: 'member1',
+    amount: 100,
+    station: 'PSO',
+    area: 'Gulberg',
+    syncStatus: 'PENDING',
+    requiresReview: false,
+  }),
+);
+
+await assertFails(
+  setDoc(doc(member.firestore(), 'organizations/org1/transactions/t5'), {
+    type: 'FUEL',
+    cardId: 'card1',
+    userId: 'member1',
+    createdBy: 'member1',
+    amount: 0,
+    station: 'PSO',
+    area: 'Gulberg',
+    syncStatus: 'PENDING',
+    requiresReview: false,
+  }),
+);
+
+await assertFails(
+  updateDoc(doc(owner.firestore(), 'organizations/org1/transactions/t1'), {
+    amount: 50,
+  }),
+);
+
+await assertFails(
+  updateDoc(doc(owner.firestore(), 'organizations/org1/recharges/r1'), {
+    amount: 1,
+  }),
+);
+
+await assertFails(
+  setDoc(doc(owner.firestore(), 'organizations/org1/adjustments/a0'), {
+    cardId: 'card1',
+    amount: 0,
+    reason: 'Zero',
+    kind: 'CORRECTION',
+    createdBy: 'owner1',
+    occurredAt: '2026-10-05T00:00:00.000Z',
+  }),
+);
+
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/settlements/s5'), {
+    userId: 'member1',
+    amount: 200,
+    method: 'cash',
+    status: 'pending',
+    createdBy: 'owner1',
+    occurredAt: '2026-10-05T22:00:00.000Z',
+  }),
+);
+
+await assertFails(
+  updateDoc(doc(member.firestore(), 'organizations/org1/settlements/s5'), {
+    status: 'confirmed',
+    confirmedBy: 'member1',
+    amount: 200,
+    method: 'cash',
+  }),
+);
+
+await assertFails(
+  setDoc(doc(member.firestore(), 'organizations/org1/cards/card1/secrets/pin'), {
+    value: '9999',
+    updatedAt: Timestamp.now(),
+  }),
+);
+
+await assertFails(
+  setDoc(doc(owner.firestore(), 'organizations/org1/cards/card1/secrets/pin'), {
+    value: '12',
+    updatedAt: Timestamp.now(),
+  }),
+);
+
+await env.withSecurityRulesDisabled(async (context) => {
+  const db = context.firestore();
+  await setDoc(doc(db, 'organizations/org1/pinRequests/card1_member1'), {
+    cardId: 'card1',
+    requestedBy: 'member1',
+    status: 'pending',
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  });
+});
+
+await assertSucceeds(
+  updateDoc(doc(owner.firestore(), 'organizations/org1/pinRequests/card1_member1'), {
+    status: 'rejected',
+    resolvedBy: 'owner1',
+    resolvedAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  }),
+);
+
+await assertFails(getDoc(doc(member.firestore(), 'organizations/org1/cards/card1/secrets/pin')));
+
+await assertFails(
+  updateDoc(doc(owner.firestore(), 'organizations/org1/cards/card1'), {
+    status: 'inactive',
+    pin: '9999',
+  }),
+);
+
+await assertSucceeds(
+  updateDoc(doc(owner.firestore(), 'organizations/org1/cards/card1'), {
+    status: 'inactive',
+    name: 'Meezan',
+    last4: '1234',
+    issuer: 'Meezan',
+  }),
+);
+
+await env.withSecurityRulesDisabled(async (context) => {
+  const db = context.firestore();
+  await setDoc(doc(db, 'organizations/org1/invites/inv3'), {
+    email: 'lookup@example.com',
+    invitedBy: 'owner1',
+    status: 'pending',
+    orgName: 'Fleet Updated',
+  });
+});
+
+const lookup = env.authenticatedContext('lookup1', { email: 'lookup@example.com' });
+await assertSucceeds(getDoc(doc(lookup.firestore(), 'organizations/org1/invites/inv3')));
+await assertFails(getDoc(doc(stranger.firestore(), 'organizations/org1/invites/inv3')));
 
 await env.cleanup();
 console.log('firestore rules tests ok');

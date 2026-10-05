@@ -13,19 +13,39 @@ Fill `EXPO_PUBLIC_FIREBASE_*` and Google client IDs from Firebase / Google Cloud
 
 ## Scripts
 
+| Script | Purpose |
+|--------|---------|
+| `npm start` | Expo dev server |
+| `npm test` / `npm run test:unit` | Jest unit tests (money, balance, sync, schemas) |
+| `npm run test:functions` | Cloud Functions unit tests (reconcile/conflict) |
+| `npm run test:rules` | Firestore rules matrix via emulator |
+| `npm run typecheck` | TypeScript `tsc --noEmit` |
+| `npm run lint` | ESLint |
+| `npm run test:firebase-env` | Env var sanity check |
+| `npm run deploy:rules` | Deploy rules + indexes |
+| `npm run deploy:functions` | Build and deploy functions |
+
+Also: `npm run ios`, `npm run android`, `npm run web`.
+
+## Firebase emulators (rules tests)
+
+Rules tests need **JDK 21+** (e.g. Homebrew `openjdk@21`) and the Firebase CLI.
+
 ```bash
-npm start
-npm run ios
-npm run android
-npm run lint
-npm run typecheck
-npm test
-npm run test:functions
-npm run test:firebase-env
+export JAVA_HOME="$(brew --prefix openjdk@21)"
+export PATH="$JAVA_HOME/bin:$PATH"
 npm run test:rules
-npm run deploy:rules
-npm run deploy:functions
 ```
+
+That starts the Firestore emulator briefly, runs `scripts/firestore-rules.test.mjs`, then shuts down. Interactive UI (optional):
+
+```bash
+export JAVA_HOME="$(brew --prefix openjdk@21)"
+export PATH="$JAVA_HOME/bin:$PATH"
+npx firebase emulators:start --only firestore
+```
+
+Emulator ports are in `firebase.json` (Firestore `8080`, UI `4000`).
 
 ## Firebase
 
@@ -35,7 +55,6 @@ npm run deploy:functions
 - Firestore: persistent cache on web; memory cache on native Expo Go until a durable offline path is added
 - Rules: `firestore.rules` + `firestore.indexes.json` (deploy with `npm run deploy:rules`)
 - Functions: card balance reconcile + conflict detection (`npm run deploy:functions`, Blaze plan required)
-- Rules tests need JDK 21+ (`openjdk@21`) and the Firestore emulator
 - Never commit `.env` or service-account files
 
 Enable Google sign-in in Firebase Authentication, create OAuth client IDs, and put them in `.env`.

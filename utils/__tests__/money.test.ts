@@ -14,8 +14,15 @@ describe('money', () => {
 
   it('parses and formats PKR', () => {
     expect(parsePkrInput('1,250')).toBe(1250);
+    expect(parsePkrInput('-50')).toBe(-50);
     expect(formatPkr(1250)).toBe('Rs 1,250');
     expect(formatPkr(1250, { withSymbol: false })).toBe('1,250');
+    expect(formatPkr(0)).toBe('Rs 0');
     expect(() => parsePkrInput('12.5')).toThrow(/whole rupee/);
+    expect(() => parsePkrInput('')).toThrow(/whole rupee/);
+  });
+
+  it('sums an empty list as zero', () => {
+    expect(sumPkr([])).toBe(0);
   });
 });
