@@ -9,13 +9,21 @@ import { getFirebaseAuth } from '@/firebase/auth';
 WebBrowser.maybeCompleteAuthSession();
 
 function readClientIds() {
-  const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim() || undefined;
-  const iosClientId =
-    process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim() || webClientId;
-  const androidClientId =
-    process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID?.trim() || webClientId;
+  return {
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim() || undefined,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim() || undefined,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID?.trim() || undefined,
+  };
+}
 
-  return { webClientId, iosClientId, androidClientId };
+function missingClientMessage() {
+  if (Platform.OS === 'android') {
+    return 'Set EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID to an Android OAuth client (not the Web client). See SETUP.md.';
+  }
+  if (Platform.OS === 'ios') {
+    return 'Set EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID to an iOS OAuth client. See SETUP.md.';
+  }
+  return 'Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID and add localhost redirect URIs in Google Cloud.';
 }
 
 export function useGoogleSignIn() {
@@ -23,27 +31,40 @@ export function useGoogleSignIn() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const platformReady =
+  const platformClientId =
     Platform.OS === 'ios'
-      ? Boolean(clients.iosClientId)
+      ? clients.iosClientId
       : Platform.OS === 'android'
-        ? Boolean(clients.androidClientId)
-        : Boolean(clients.webClientId);
+        ? clients.androidClientId
+        : clients.webClientId;
 
   const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
     webClientId: clients.webClientId,
-    iosClientId: clients.iosClientId,
-    androidClientId: clients.androidClientId,
+    iosClientId: clients.iosClientId || clients.webClientId,
+    androidClientId: clients.androidClientId || clients.webClientId,
   });
 
   useEffect(() => {
+    if (!platformClientId) {
+      setError(missingClientMessage());
+    }
+  }, [platformClientId]);
+
+  useEffect(() => {
     if (response?.type !== 'success') {
+      if (response?.type === 'error') {
+        setError(response.error?.message ?? 'Google sign-in was rejected.');
+      }
       return;
     }
 
-    const idToken = response.params.id_token;
+    const idToken =
+      response.params.id_token ??
+      response.authentication?.idToken ??
+      undefined;
+
     if (!idToken) {
-      setError('Google sign-in did not return an ID token.');
+      setError('Google sign-in did not return an ID token. Check OAuth client type and redirect URIs.');
       return;
     }
 
@@ -65,9 +86,10 @@ export function useGoogleSignIn() {
   }, [response]);
 
   return {
-    ready: Boolean(request) && platformReady,
+    ready: Boolean(request) && Boolean(platformClientId),
     busy,
     error,
+    redirectUri: request?.redirectUri ?? null,
     promptAsync,
   };
 }

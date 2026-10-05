@@ -49,7 +49,14 @@ export default function LoginScreen() {
 
       {!google.ready && configured ? (
         <Text className="mt-md text-sm text-muted">
-          Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (and iOS/Android client IDs for native builds).
+          Android needs an Android OAuth client ID in `.env`. Web needs localhost redirect URIs.
+        </Text>
+      ) : null}
+
+      {google.redirectUri ? (
+        <Text className="mt-md text-xs text-muted">
+          Redirect URI (add this in Google Cloud if using Web client):{'\n'}
+          {google.redirectUri}
         </Text>
       ) : null}
 
