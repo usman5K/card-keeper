@@ -25,9 +25,12 @@ npm run test:firebase-env
 ## Firebase
 
 - Client SDK: Firebase JS (`firebase` 12.x)
-- Auth: AsyncStorage persistence on iOS/Android
+- Auth: Google via Expo AuthSession ID token + Firebase credential
+- Auth persistence: AsyncStorage on iOS/Android
 - Firestore: persistent cache on web; memory cache on native Expo Go until a durable offline path is added
 - Never commit `.env` or service-account files
+
+Enable Google sign-in in Firebase Authentication, create OAuth client IDs, and put them in `.env`.
 
 ## Notes
 
