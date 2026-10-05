@@ -33,5 +33,6 @@ export type OrgInvite = {
   email: string;
   invitedBy: string;
   status: InviteStatus;
+  orgName: string;
   createdAt?: unknown;
 };

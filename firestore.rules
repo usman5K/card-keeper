@@ -1,0 +1,138 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function authEmail() {
+      return signedIn() && request.auth.token.email is string
+        ? request.auth.token.email.lower()
+        : '';
+    }
+
+    function memberDoc(orgId) {
+      return get(/databases/$(database)/documents/organizations/$(orgId)/members/$(uid()));
+    }
+
+    function isActiveMember(orgId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(uid()))
+        && memberDoc(orgId).data.status == 'active';
+    }
+
+    function isOwner(orgId) {
+      return isActiveMember(orgId) && memberDoc(orgId).data.role == 'owner';
+    }
+
+    function isOrgOwnerCreate() {
+      return signedIn()
+        && request.resource.data.ownerId == uid()
+        && request.resource.data.currency == 'PKR'
+        && request.resource.data.keys().hasAll(['name', 'ownerId', 'currency']);
+    }
+
+    match /users/{userId} {
+      allow read, update: if signedIn() && uid() == userId;
+      allow create: if signedIn()
+        && uid() == userId
+        && request.resource.data.email is string;
+      allow delete: if false;
+    }
+
+    match /organizations/{orgId} {
+      allow create: if isOrgOwnerCreate();
+      allow read: if isActiveMember(orgId);
+      allow update: if isOwner(orgId)
+        && request.resource.data.ownerId == resource.data.ownerId;
+      allow delete: if false;
+
+      match /members/{memberId} {
+        allow read: if isActiveMember(orgId);
+
+        allow create: if signedIn() && (
+          (
+            memberId == uid()
+            && request.resource.data.role in ['owner', 'member']
+            && request.resource.data.status == 'active'
+            && request.resource.data.email == authEmail()
+          )
+          || (
+            isOwner(orgId)
+            && request.resource.data.role in ['owner', 'member']
+          )
+        );
+
+        allow update: if isOwner(orgId)
+          || (memberId == uid()
+            && isActiveMember(orgId)
+            && request.resource.data.role == resource.data.role);
+        allow delete: if false;
+      }
+
+      match /invites/{inviteId} {
+        allow read: if isOwner(orgId)
+          || (signedIn()
+            && resource.data.email == authEmail()
+            && resource.data.status == 'pending');
+
+        allow create: if isOwner(orgId)
+          && request.resource.data.email is string
+          && request.resource.data.status == 'pending'
+          && request.resource.data.invitedBy == uid()
+          && request.resource.data.orgName is string;
+
+        allow update: if isOwner(orgId)
+          || (
+            signedIn()
+            && resource.data.email == authEmail()
+            && resource.data.status == 'pending'
+            && request.resource.data.status == 'accepted'
+            && request.resource.data.email == resource.data.email
+          );
+
+        allow delete: if isOwner(orgId);
+      }
+
+      match /cards/{cardId} {
+        allow read: if isActiveMember(orgId);
+        allow create, update: if isOwner(orgId);
+        allow delete: if false;
+      }
+
+      match /transactions/{docId} {
+        allow read: if isActiveMember(orgId);
+        allow create, update, delete: if false;
+      }
+
+      match /recharges/{docId} {
+        allow read: if isActiveMember(orgId);
+        allow create, update, delete: if false;
+      }
+
+      match /adjustments/{docId} {
+        allow read: if isActiveMember(orgId);
+        allow create, update, delete: if false;
+      }
+
+      match /settlements/{docId} {
+        allow read: if isActiveMember(orgId);
+        allow create, update, delete: if false;
+      }
+
+      match /pinRequests/{docId} {
+        allow read: if isActiveMember(orgId);
+        allow create, update, delete: if false;
+      }
+
+      match /auditLogs/{docId} {
+        allow read: if isOwner(orgId);
+        allow create, update, delete: if false;
+      }
+    }
+  }
+}

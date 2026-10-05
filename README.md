@@ -20,6 +20,8 @@ npm run android
 npm run lint
 npm run typecheck
 npm run test:firebase-env
+npm run test:rules
+npm run deploy:rules
 ```
 
 ## Firebase
@@ -28,6 +30,8 @@ npm run test:firebase-env
 - Auth: Google via Expo AuthSession ID token + Firebase credential
 - Auth persistence: AsyncStorage on iOS/Android
 - Firestore: persistent cache on web; memory cache on native Expo Go until a durable offline path is added
+- Rules: `firestore.rules` + `firestore.indexes.json` (deploy with `npm run deploy:rules`)
+- Rules tests need JDK 21+ (`openjdk@21`) and the Firestore emulator
 - Never commit `.env` or service-account files
 
 Enable Google sign-in in Firebase Authentication, create OAuth client IDs, and put them in `.env`.
