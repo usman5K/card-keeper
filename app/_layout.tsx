@@ -117,6 +117,7 @@ export default function RootLayout() {
                 <Stack.Screen name="settings" options={{ title: 'Settings' }} />
                 <Stack.Screen name="audit" options={{ title: 'Audit log' }} />
                 <Stack.Screen name="conflicts" options={{ title: 'Conflict review' }} />
+                <Stack.Screen name="person/[userId]" options={{ title: 'Person' }} />
               </Stack>
               <AuthRedirect />
             </View>
