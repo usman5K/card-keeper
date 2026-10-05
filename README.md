@@ -9,19 +9,28 @@ npm install
 cp .env.example .env
 ```
 
+Fill `EXPO_PUBLIC_FIREBASE_*` from your Firebase web app settings. The app boots without them, but Auth/Firestore stay inactive until they are set.
+
 ## Scripts
 
 ```bash
-npm start          # Expo dev server
-npm run ios        # iOS
-npm run android    # Android
-npm run lint       # ESLint
-npm run typecheck  # tsc --noEmit
+npm start
+npm run ios
+npm run android
+npm run lint
+npm run typecheck
+npm run test:firebase-env
 ```
+
+## Firebase
+
+- Client SDK: Firebase JS (`firebase` 12.x)
+- Auth: AsyncStorage persistence on iOS/Android
+- Firestore: persistent cache on web; memory cache on native Expo Go until a durable offline path is added
+- Never commit `.env` or service-account files
 
 ## Notes
 
 - Display name: FuelLedger
 - UI: app tokens + NativeWind 4 + `@expo/ui` + lucide
-- `@expo/ui` native controls need a recent Expo Go or a dev build; the smoke Host on Home should still compile for typecheck/export
-- Do not commit `.env` or Firebase service-account files
+- `@expo/ui` native controls need a recent Expo Go or a dev build
