@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -12,6 +11,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AmountField } from '@/components/AmountField';
+import { CardsSkeleton } from '@/components/CardsSkeleton';
+import { ConfirmSheet } from '@/components/ConfirmSheet';
 import { EmptyState } from '@/components/EmptyState';
 import {
   createOpeningBalance,
@@ -43,13 +44,21 @@ import {
   listRechargesForCard,
   type RechargeDoc,
 } from '@/features/recharges/rechargeService';
-import { colors } from '@/theme/tokens';
+import { a11y, colors } from '@/theme/tokens';
 import type { FuelCardDoc } from '@/types/card';
 import { formatPkr, parsePkrInput } from '@/utils/money';
 
 type TimelineItem =
   | { kind: 'recharge'; occurredAt: string; item: RechargeDoc }
   | { kind: 'adjustment'; occurredAt: string; item: AdjustmentDoc };
+
+type PendingConfirm = {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  run: () => Promise<void>;
+};
 
 export default function CardsScreen() {
   const { user } = useAuth();
@@ -86,6 +95,7 @@ export default function CardsScreen() {
   const [revealPin, setRevealPin] = useState<string | null>(null);
   const [resolveOpen, setResolveOpen] = useState(false);
   const [resolveTarget, setResolveTarget] = useState<PinRequestDoc | null>(null);
+  const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
 
   useEffect(() => {
     if (!orgReady) {
@@ -338,34 +348,27 @@ export default function CardsScreen() {
   }
 
   function confirmReverseRecharge(item: RechargeDoc) {
-    Alert.alert(
-      'Reverse recharge',
-      `Create a reversal for ${formatPkr(item.amount)}? The original recharge stays on the ledger.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reverse recharge',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              if (!orgId || !user || !editing) {
-                return;
-              }
-              setBusy(true);
-              setError(null);
-              try {
-                await reverseRecharge(orgId, user.uid, item);
-                await loadTimeline(editing);
-              } catch (err) {
-                setError(err instanceof Error ? err.message : 'Reverse failed');
-              } finally {
-                setBusy(false);
-              }
-            })();
-          },
-        },
-      ],
-    );
+    setConfirm({
+      title: 'Reverse recharge',
+      body: `Create a reversal for ${formatPkr(item.amount)}? The original recharge stays on the ledger.`,
+      confirmLabel: 'Reverse recharge',
+      destructive: true,
+      run: async () => {
+        if (!orgId || !user || !editing) {
+          return;
+        }
+        setBusy(true);
+        setError(null);
+        try {
+          await reverseRecharge(orgId, user.uid, item);
+          await loadTimeline(editing);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Reverse failed');
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
   }
 
   async function saveOpeningOnly() {
@@ -413,30 +416,27 @@ export default function CardsScreen() {
   }
 
   function confirmDeactivate(card: FuelCardDoc) {
-    Alert.alert('Deactivate card', `Stop using ${card.name} for new fuel?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Deactivate card',
-        style: 'destructive',
-        onPress: () => {
-          void (async () => {
-            if (!orgId || !user) {
-              return;
-            }
-            setBusy(true);
-            try {
-              await updateCard(orgId, user.uid, card.id, { status: 'inactive' });
-              setFormOpen(false);
-              reload();
-            } catch (err) {
-              setError(err instanceof Error ? err.message : 'Update failed');
-            } finally {
-              setBusy(false);
-            }
-          })();
-        },
+    setConfirm({
+      title: 'Deactivate card',
+      body: `Stop using ${card.name} for new fuel?`,
+      confirmLabel: 'Deactivate card',
+      destructive: true,
+      run: async () => {
+        if (!orgId || !user) {
+          return;
+        }
+        setBusy(true);
+        try {
+          await updateCard(orgId, user.uid, card.id, { status: 'inactive' });
+          setFormOpen(false);
+          reload();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Update failed');
+        } finally {
+          setBusy(false);
+        }
       },
-    ]);
+    });
   }
 
   async function reactivate(card: FuelCardDoc) {
@@ -472,14 +472,18 @@ export default function CardsScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Add card"
-            className="rounded-lg bg-ink px-md py-sm"
+            className="items-center justify-center rounded-lg bg-ink px-md"
+            style={({ pressed }) => ({
+              minHeight: a11y.minHit,
+              opacity: pressed ? 0.88 : 1,
+            })}
             onPress={openCreate}>
             <Text className="text-sm font-semibold text-background">Add card</Text>
           </Pressable>
         ) : null}
       </View>
 
-      {error ? (
+      {error && cards.length > 0 ? (
         <Text className="px-md pt-md text-sm" style={{ color: colors.danger }}>
           {error}
         </Text>
@@ -517,8 +521,22 @@ export default function CardsScreen() {
       ) : null}
 
       {loading ? (
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color={colors.accent} />
+        <CardsSkeleton />
+      ) : error && cards.length === 0 ? (
+        <View className="px-md pt-lg">
+          <EmptyState title="Could not load cards" body={error} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading cards"
+            className="mt-md items-center rounded-lg border border-border px-md"
+            style={{ minHeight: a11y.minHit, justifyContent: 'center' }}
+            onPress={() => {
+              setLoading(true);
+              setError(null);
+              setReloadKey((value) => value + 1);
+            }}>
+            <Text className="text-base font-medium text-ink">Try again</Text>
+          </Pressable>
         </View>
       ) : (
         <FlatList
@@ -540,6 +558,7 @@ export default function CardsScreen() {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`${item.name} ending ${item.last4}`}
+                style={{ minHeight: a11y.minHit, justifyContent: 'center' }}
                 onPress={() => openEdit(item)}>
                 <View className="flex-row items-center justify-between">
                   <Text className="text-lg font-semibold text-ink">{item.name}</Text>
@@ -560,7 +579,8 @@ export default function CardsScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Add recharge for ${item.name}`}
-                  className="mt-md self-start rounded-lg border border-border px-md py-sm"
+                  className="mt-md self-start items-center justify-center rounded-lg border border-border px-md"
+                  style={{ minHeight: a11y.minHit }}
                   onPress={() => openRecharge(item)}>
                   <Text className="text-sm font-medium text-ink">Add recharge</Text>
                 </Pressable>
@@ -574,7 +594,8 @@ export default function CardsScreen() {
                         <Pressable
                           accessibilityRole="button"
                           accessibilityLabel={`View PIN for ${item.name}`}
-                          className="rounded-lg bg-ink px-md py-sm"
+                          className="items-center justify-center rounded-lg bg-ink px-md"
+                          style={{ minHeight: a11y.minHit }}
                           disabled={busy}
                           onPress={() => void openReveal(item)}>
                           <Text className="text-sm font-medium text-background">View PIN</Text>
@@ -590,7 +611,8 @@ export default function CardsScreen() {
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={`Request PIN for ${item.name}`}
-                        className="rounded-lg border border-border px-md py-sm"
+                        className="items-center justify-center rounded-lg border border-border px-md"
+                        style={{ minHeight: a11y.minHit }}
                         disabled={busy}
                         onPress={() => void handleRequestPin(item)}>
                         <Text className="text-sm font-medium text-ink">Request PIN</Text>
@@ -603,7 +625,8 @@ export default function CardsScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`View PIN for ${item.name}`}
-                  className="mt-md self-start rounded-lg border border-border px-md py-sm"
+                  className="mt-md self-start items-center justify-center rounded-lg border border-border px-md"
+                  style={{ minHeight: a11y.minHit }}
                   disabled={busy}
                   onPress={() => void openReveal(item)}>
                   <Text className="text-sm font-medium text-ink">View PIN</Text>
@@ -613,6 +636,30 @@ export default function CardsScreen() {
           )}
         />
       )}
+
+      <ConfirmSheet
+        visible={confirm != null}
+        title={confirm?.title ?? ''}
+        body={confirm?.body ?? ''}
+        confirmLabel={confirm?.confirmLabel ?? ''}
+        destructive={confirm?.destructive}
+        busy={busy}
+        onCancel={() => {
+          if (!busy) {
+            setConfirm(null);
+          }
+        }}
+        onConfirm={() => {
+          const run = confirm?.run;
+          if (!run) {
+            return;
+          }
+          void (async () => {
+            await run();
+            setConfirm(null);
+          })();
+        }}
+      />
 
       <Modal visible={formOpen} animationType="slide" transparent onRequestClose={() => setFormOpen(false)}>
         <View className="flex-1 justify-end bg-black/40">
@@ -705,7 +752,8 @@ export default function CardsScreen() {
                             <Pressable
                               accessibilityRole="button"
                               accessibilityLabel="Reverse recharge"
-                              className="mt-sm self-start"
+                              className="mt-sm self-start justify-center"
+                              style={{ minHeight: a11y.minHit }}
                               disabled={busy}
                               onPress={() => confirmReverseRecharge(item)}>
                               <Text className="text-sm font-medium" style={{ color: colors.danger }}>

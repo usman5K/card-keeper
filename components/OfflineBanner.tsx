@@ -1,6 +1,6 @@
 import { Text, View } from 'react-native';
 
-import { colors } from '@/theme/tokens';
+import { a11y, colors } from '@/theme/tokens';
 
 type Props = {
   visible: boolean;
@@ -18,8 +18,8 @@ export function OfflineBanner({
   return (
     <View
       accessibilityRole="alert"
-      className="px-md py-sm"
-      style={{ backgroundColor: '#F5E6C8' }}>
+      className="justify-center px-md"
+      style={{ backgroundColor: '#F5E6C8', minHeight: a11y.minHit }}>
       <Text className="text-sm font-medium" style={{ color: colors.offline }}>
         {message}
       </Text>

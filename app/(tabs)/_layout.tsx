@@ -47,6 +47,7 @@ export default function TabLayout() {
           name="index"
           options={{
             title: 'Home',
+            tabBarAccessibilityLabel: 'Home tab',
             tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
           }}
         />
@@ -54,6 +55,7 @@ export default function TabLayout() {
           name="cards"
           options={{
             title: 'Cards',
+            tabBarAccessibilityLabel: 'Cards tab',
             tabBarIcon: ({ color, size }) => (
               <CreditCard color={color} size={size} />
             ),
@@ -63,6 +65,7 @@ export default function TabLayout() {
           name="people"
           options={{
             title: 'People',
+            tabBarAccessibilityLabel: 'People tab',
             tabBarIcon: ({ color, size }) => <Users color={color} size={size} />,
           }}
         />
@@ -70,6 +73,7 @@ export default function TabLayout() {
           name="reports"
           options={{
             title: 'Reports',
+            tabBarAccessibilityLabel: 'Reports tab',
             tabBarIcon: ({ color, size }) => (
               <LineChart color={color} size={size} />
             ),

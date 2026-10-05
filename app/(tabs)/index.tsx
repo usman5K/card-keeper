@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -13,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AmountField } from '@/components/AmountField';
 import { BalanceHero } from '@/components/BalanceHero';
+import { ConfirmSheet } from '@/components/ConfirmSheet';
 import { EmptyState } from '@/components/EmptyState';
 import { HomeSkeleton } from '@/components/HomeSkeleton';
 import { PendingBanner } from '@/components/PendingBanner';
@@ -39,7 +39,7 @@ import {
   listPendingSettlements,
 } from '@/features/settlements/settlementService';
 import { useSync } from '@/features/sync/SyncProvider';
-import { colors } from '@/theme/tokens';
+import { a11y, colors } from '@/theme/tokens';
 import type { FuelCardDoc } from '@/types/card';
 import { recentChips } from '@/utils/chips';
 import {
@@ -53,6 +53,14 @@ import { parsePkrInput, formatPkr, addPkr } from '@/utils/money';
 
 const RECENT_LIMIT = 8;
 const FUEL_WINDOW = 100;
+
+type PendingConfirm = {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  run: () => Promise<void>;
+};
 
 export default function HomeScreen() {
   const { user } = useAuth();
@@ -79,6 +87,7 @@ export default function HomeScreen() {
   const [pendingSettlementCount, setPendingSettlementCount] = useState(0);
   const [reversedIds, setReversedIds] = useState<Set<string>>(new Set());
   const [reloadKey, setReloadKey] = useState(0);
+  const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
 
   useEffect(() => {
     if (!orgId || !member || !user) {
@@ -213,35 +222,28 @@ export default function HomeScreen() {
   }
 
   function confirmReverseFuel(item: FuelTransactionDoc) {
-    Alert.alert(
-      'Reverse fuel',
-      `Create a reversal for ${formatPkr(item.amount)} at ${item.station}? The original entry stays on the ledger.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reverse fuel',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              if (!orgId || !user) {
-                return;
-              }
-              setBusy(true);
-              setError(null);
-              try {
-                await reverseFuelTransaction(orgId, user.uid, item);
-                setReloadKey((value) => value + 1);
-                refreshSync();
-              } catch (err) {
-                setError(err instanceof Error ? err.message : 'Reverse failed');
-              } finally {
-                setBusy(false);
-              }
-            })();
-          },
-        },
-      ],
-    );
+    setConfirm({
+      title: 'Reverse fuel',
+      body: `Create a reversal for ${formatPkr(item.amount)} at ${item.station}? The original entry stays on the ledger.`,
+      confirmLabel: 'Reverse fuel',
+      destructive: true,
+      run: async () => {
+        if (!orgId || !user) {
+          return;
+        }
+        setBusy(true);
+        setError(null);
+        try {
+          await reverseFuelTransaction(orgId, user.uid, item);
+          setReloadKey((value) => value + 1);
+          refreshSync();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Reverse failed');
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
   }
 
   async function submitFuel() {
@@ -279,10 +281,12 @@ export default function HomeScreen() {
     };
 
     if (!isOnline) {
-      Alert.alert('Saved offline', 'This fuel entry will sync when you are back online.', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Save offline', onPress: () => void runCreate() },
-      ]);
+      setConfirm({
+        title: 'Save offline',
+        body: 'This fuel entry will sync when you are back online.',
+        confirmLabel: 'Save offline',
+        run: runCreate,
+      });
       return;
     }
 
@@ -299,10 +303,21 @@ export default function HomeScreen() {
                 {orgName ?? 'Workspace'}
               </Text>
             </View>
-            <Link href="/settings" accessibilityLabel="Open settings">
-              <Text style={{ color: colors.accent }} className="text-sm font-medium">
-                Settings
-              </Text>
+            <Link href="/settings" asChild>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open settings"
+                className="items-center justify-center px-sm"
+                style={({ pressed }) => ({
+                  minHeight: a11y.minHit,
+                  minWidth: a11y.minHit,
+                  opacity: pressed ? 0.7 : 1,
+                  justifyContent: 'center',
+                })}>
+                <Text style={{ color: colors.accent }} className="text-sm font-medium">
+                  Settings
+                </Text>
+              </Pressable>
             </Link>
           </View>
 
@@ -401,7 +416,8 @@ export default function HomeScreen() {
                         <Pressable
                           accessibilityRole="button"
                           accessibilityLabel={`Reverse fuel ${item.station}`}
-                          className="mb-sm self-start pb-md"
+                          className="mb-sm self-start justify-center pb-md"
+                          style={{ minHeight: a11y.minHit }}
                           disabled={busy}
                           onPress={() => confirmReverseFuel(item)}>
                           <Text className="text-sm font-medium" style={{ color: colors.danger }}>
@@ -435,13 +451,41 @@ export default function HomeScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Add Fuel"
-          className="items-center rounded-lg bg-ink px-md py-md"
-          style={{ opacity: cards.length === 0 ? 0.45 : 1 }}
+          className="items-center rounded-lg bg-ink px-md"
+          style={({ pressed }) => ({
+            minHeight: a11y.minHit,
+            justifyContent: 'center',
+            opacity: cards.length === 0 ? 0.45 : pressed ? 0.88 : 1,
+          })}
           onPress={openSheet}
           disabled={cards.length === 0 || loading}>
           <Text className="text-base font-semibold text-background">Add Fuel</Text>
         </Pressable>
       </View>
+
+      <ConfirmSheet
+        visible={confirm != null}
+        title={confirm?.title ?? ''}
+        body={confirm?.body ?? ''}
+        confirmLabel={confirm?.confirmLabel ?? ''}
+        destructive={confirm?.destructive}
+        busy={busy}
+        onCancel={() => {
+          if (!busy) {
+            setConfirm(null);
+          }
+        }}
+        onConfirm={() => {
+          const run = confirm?.run;
+          if (!run) {
+            return;
+          }
+          void (async () => {
+            await run();
+            setConfirm(null);
+          })();
+        }}
+      />
 
       <Modal visible={sheetOpen} animationType="slide" transparent onRequestClose={() => setSheetOpen(false)}>
         <View className="flex-1 justify-end bg-black/40">
