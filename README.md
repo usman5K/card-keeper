@@ -19,6 +19,7 @@ npm run ios
 npm run android
 npm run lint
 npm run typecheck
+npm test
 npm run test:firebase-env
 npm run test:rules
 npm run deploy:rules
