@@ -9,12 +9,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import NetInfo from '@react-native-community/netinfo';
 import { Link, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AmountField } from '@/components/AmountField';
-import { SyncBadge } from '@/components/SyncBadge';
 import { TransactionRow } from '@/components/TransactionRow';
 import {
   listReversalLinkedIds,
@@ -30,6 +28,7 @@ import {
 import { useOrg } from '@/features/org/OrgProvider';
 import { listActiveMembers, type OrgMemberDoc } from '@/features/org/orgService';
 import { getPersonOutstanding } from '@/features/settlements/settlementService';
+import { useSync } from '@/features/sync/SyncProvider';
 import { colors } from '@/theme/tokens';
 import type { FuelCardDoc } from '@/types/card';
 import { recentChips } from '@/utils/chips';
@@ -38,10 +37,10 @@ import { parsePkrInput, formatPkr } from '@/utils/money';
 export default function HomeScreen() {
   const { user } = useAuth();
   const { orgId, orgName, member } = useOrg();
+  const { status, isOnline, counts, balanceTrusted, refresh: refreshSync } = useSync();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const isOwner = member?.role === 'owner';
-  const [online, setOnline] = useState(true);
   const [txs, setTxs] = useState<FuelTransactionDoc[]>([]);
   const [cards, setCards] = useState<FuelCardDoc[]>([]);
   const [people, setPeople] = useState<OrgMemberDoc[]>([]);
@@ -58,16 +57,6 @@ export default function HomeScreen() {
   const [myOutstanding, setMyOutstanding] = useState<number | null>(null);
   const [reversedIds, setReversedIds] = useState<Set<string>>(new Set());
   const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener((state) => {
-      // Web often leaves isInternetReachable null; treat null as online when connected.
-      const connected = state.isConnected !== false;
-      const reachable = state.isInternetReachable !== false;
-      setOnline(connected && reachable);
-    });
-    return unsubscribe;
-  }, []);
 
   useEffect(() => {
     if (!orgId || !member || !user) {
@@ -158,6 +147,7 @@ export default function HomeScreen() {
               try {
                 await reverseFuelTransaction(orgId, user.uid, item);
                 setReloadKey((value) => value + 1);
+                refreshSync();
               } catch (err) {
                 setError(err instanceof Error ? err.message : 'Reverse failed');
               } finally {
@@ -199,6 +189,7 @@ export default function HomeScreen() {
           userId: isOwner ? undefined : user.uid,
         });
         setTxs(nextTxs);
+        refreshSync();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not save fuel');
       } finally {
@@ -206,7 +197,7 @@ export default function HomeScreen() {
       }
     };
 
-    if (!online) {
+    if (!isOnline) {
       Alert.alert('Saved offline', 'This fuel entry will sync when you are back online.', [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Save offline', onPress: () => void runCreate() },
@@ -221,14 +212,32 @@ export default function HomeScreen() {
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 24 }}>
         <View className="px-md pt-md">
-          <View className="flex-row items-center justify-between">
-            <SyncBadge status={online ? 'online' : 'offline'} />
+          <View className="flex-row items-center justify-end">
             <Link href="/settings" accessibilityLabel="Open settings">
               <Text style={{ color: colors.accent }} className="text-sm font-medium">
                 Settings
               </Text>
             </Link>
           </View>
+
+          {isOwner && counts.conflict > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Review sync conflicts"
+              className="mt-md rounded-lg px-md py-sm"
+              style={{ backgroundColor: '#FCEBEA' }}
+              onPress={() => router.push('/conflicts')}>
+              <Text className="text-sm font-medium" style={{ color: colors.danger }}>
+                {counts.conflict} conflict{counts.conflict === 1 ? '' : 's'} need review
+              </Text>
+            </Pressable>
+          ) : null}
+
+          {counts.pending > 0 && status !== 'offline' ? (
+            <Text className="mt-md text-sm text-muted">
+              {counts.pending} pending sync{counts.pending === 1 ? '' : 's'}
+            </Text>
+          ) : null}
 
           <Text className="mt-lg text-sm font-medium uppercase tracking-wide text-muted">
             {orgName ?? 'Workspace'}
@@ -243,7 +252,9 @@ export default function HomeScreen() {
           </Text>
           <Text className="mt-sm text-base text-muted">
             {selectedCard
-              ? `${selectedCard.name} preview. Server reconcile comes next.`
+              ? balanceTrusted
+                ? `${selectedCard.name}`
+                : `${selectedCard.name} · last known, not final`
               : 'Add a card to start tracking balance.'}
           </Text>
           {myOutstanding !== null ? (
@@ -275,7 +286,7 @@ export default function HomeScreen() {
                   <TransactionRow
                     amount={item.amount}
                     title={item.station}
-                    subtitle={`${item.area}${item.syncStatus === 'PENDING' ? ' · pending sync' : ''}${alreadyReversed ? ' · reversed' : ''}`}
+                    subtitle={`${item.area}${item.syncStatus === 'PENDING' ? ' · pending sync' : ''}${item.requiresReview ? ' · needs review' : ''}${alreadyReversed ? ' · reversed' : ''}`}
                     syncStatus={item.syncStatus}
                   />
                   {isOwner && !alreadyReversed ? (
@@ -443,7 +454,7 @@ export default function HomeScreen() {
               disabled={busy}
               onPress={() => void submitFuel()}>
               <Text className="text-base font-semibold text-background">
-                {busy ? 'Saving…' : online ? 'Save fuel' : 'Save offline'}
+                {busy ? 'Saving…' : isOnline ? 'Save fuel' : 'Save offline'}
               </Text>
             </Pressable>
             <Pressable

@@ -18,6 +18,9 @@ export type FuelTransaction = {
   serverBalanceAfter?: number | null;
   syncStatus: SyncStatus;
   requiresReview: boolean;
+  reviewedBy?: string;
+  reviewedAt?: unknown;
+  reviewAction?: 'acknowledge' | 'reverse' | 'adjust';
   notes?: string;
 };
 

@@ -10,6 +10,7 @@ import '@/features/auth/authSessionBootstrap';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { OrgProvider, useOrg } from '@/features/org/OrgProvider';
+import { SyncProvider } from '@/features/sync/SyncProvider';
 import { getFirebaseAuth } from '@/firebase/auth';
 import { colors } from '@/theme/tokens';
 
@@ -107,15 +108,18 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <AuthProvider>
         <OrgProvider>
-          <View className="flex-1 bg-background">
-            <Stack>
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="login" options={{ headerShown: false }} />
-              <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-              <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-            </Stack>
-            <AuthRedirect />
-          </View>
+          <SyncProvider>
+            <View className="flex-1 bg-background">
+              <Stack>
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="login" options={{ headerShown: false }} />
+                <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+                <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+                <Stack.Screen name="conflicts" options={{ title: 'Conflict review' }} />
+              </Stack>
+              <AuthRedirect />
+            </View>
+          </SyncProvider>
         </OrgProvider>
       </AuthProvider>
     </SafeAreaProvider>
