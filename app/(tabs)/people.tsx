@@ -1,25 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Modal,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AmountField } from '@/components/AmountField';
+import { BalanceHero } from '@/components/BalanceHero';
 import { EmptyState } from '@/components/EmptyState';
+import { PeopleSkeleton } from '@/components/PeopleSkeleton';
+import { SettlementPaymentSheet } from '@/components/SettlementPaymentSheet';
 import { useAuth } from '@/features/auth/AuthProvider';
-import { listAllCards } from '@/features/cards/cardService';
 import { useOrg } from '@/features/org/OrgProvider';
-import {
-  listActiveMembers,
-  setMemberAssignedCards,
-  type OrgMemberDoc,
-} from '@/features/org/orgService';
+import { listActiveMembers, type OrgMemberDoc } from '@/features/org/orgService';
 import {
   settlementMethods,
   type SettlementInput,
@@ -32,75 +22,72 @@ import {
   type SettlementDoc,
 } from '@/features/settlements/settlementService';
 import { colors } from '@/theme/tokens';
-import type { FuelCardDoc } from '@/types/card';
 import { formatPkr, parsePkrInput } from '@/utils/money';
-
-type OutstandingMap = Record<
-  string,
-  { outstanding: number; fuelTotal: number; settledTotal: number }
->;
-
-const METHOD_LABELS: Record<(typeof settlementMethods)[number], string> = {
-  cash: 'Cash',
-  bank: 'Bank',
-  jazzcash: 'JazzCash',
-  easypaisa: 'Easypaisa',
-  other: 'Other',
-};
+import {
+  assignedCardCountLabel,
+  buildPersonListItems,
+  inviteEmailLooksValid,
+  personDisplayName,
+  settlementMethodLabel,
+  sortPeopleByOutstanding,
+  sumRecoverableOutstanding,
+  type PersonFinance,
+} from '@/utils/peopleDashboard';
 
 export default function PeopleScreen() {
   const { user } = useAuth();
-  const { orgId, orgName, member, inviteEmail, refresh } = useOrg();
+  const { orgId, orgName, member, inviteEmail } = useOrg();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
+  const isOwner = member?.role === 'owner';
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<OrgMemberDoc[]>([]);
-  const [cards, setCards] = useState<FuelCardDoc[]>([]);
-  const [outstanding, setOutstanding] = useState<OutstandingMap>({});
+  const [finance, setFinance] = useState<Record<string, PersonFinance>>({});
   const [pending, setPending] = useState<SettlementDoc[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [payUserId, setPayUserId] = useState<string | null>(null);
   const [amountText, setAmountText] = useState('');
   const [method, setMethod] = useState<(typeof settlementMethods)[number]>('cash');
   const [notes, setNotes] = useState('');
-  const isOwner = member?.role === 'owner';
+  const [reloadKey, setReloadKey] = useState(0);
 
   const loadLedger = useCallback(async () => {
     if (!orgId || !member || !user) {
       setMembers([]);
-      setCards([]);
-      setOutstanding({});
+      setFinance({});
       setPending([]);
       setLoading(false);
       return;
     }
 
     const nextMembers = await listActiveMembers(orgId);
-    const nextCards = isOwner
-      ? (await listAllCards(orgId)).filter((card) => card.status === 'active')
-      : [];
-    const targets = isOwner ? nextMembers : nextMembers.filter((item) => item.id === user.uid);
+    const targets = isOwner
+      ? nextMembers
+      : nextMembers.filter((item) => item.id === user.uid);
     const rows = await Promise.all(
       targets.map(async (person) => {
         const row = await getPersonOutstanding(orgId, person.id);
-        return [person.id, row] as const;
+        return [
+          person.id,
+          {
+            outstanding: row.outstanding,
+            fuelTotal: row.fuelTotal,
+            settledTotal: row.settledTotal,
+          },
+        ] as const;
       }),
     );
-    const map: OutstandingMap = {};
+    const map: Record<string, PersonFinance> = {};
     for (const [id, row] of rows) {
-      map[id] = {
-        outstanding: row.outstanding,
-        fuelTotal: row.fuelTotal,
-        settledTotal: row.settledTotal,
-      };
+      map[id] = row;
     }
     const nextPending = isOwner ? await listPendingSettlements(orgId) : [];
     setMembers(nextMembers);
-    setCards(nextCards);
-    setOutstanding(map);
+    setFinance(map);
     setPending(nextPending);
   }, [orgId, member, user, isOwner]);
 
@@ -108,6 +95,7 @@ export default function PeopleScreen() {
     let cancelled = false;
     const timer = setTimeout(() => {
       void (async () => {
+        setLoading(true);
         try {
           await loadLedger();
           if (!cancelled) {
@@ -128,7 +116,30 @@ export default function PeopleScreen() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [loadLedger]);
+  }, [loadLedger, reloadKey]);
+
+  const listItems = useMemo(() => {
+    if (!user || !member) {
+      return [];
+    }
+    return sortPeopleByOutstanding(
+      buildPersonListItems(members, finance, {
+        role: member.role,
+        uid: user.uid,
+      }),
+    );
+  }, [members, finance, user, member]);
+
+  const recoverable = useMemo(() => {
+    if (isOwner) {
+      return sumRecoverableOutstanding(
+        listItems
+          .filter((item) => item.outstanding != null)
+          .map((item) => ({ outstanding: item.outstanding as number })),
+      );
+    }
+    return user ? (finance[user.uid]?.outstanding ?? 0) : 0;
+  }, [isOwner, listItems, finance, user]);
 
   function openPayment(userId: string) {
     setPayUserId(userId);
@@ -159,7 +170,7 @@ export default function PeopleScreen() {
           ? 'Settlement recorded and confirmed.'
           : 'Settlement submitted for owner confirmation.',
       );
-      await loadLedger();
+      setReloadKey((value) => value + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save settlement');
     } finally {
@@ -176,7 +187,7 @@ export default function PeopleScreen() {
     try {
       await confirmSettlement(orgId, item.id, user.uid);
       setMessage('Settlement confirmed.');
-      await loadLedger();
+      setReloadKey((value) => value + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not confirm settlement');
     } finally {
@@ -184,62 +195,54 @@ export default function PeopleScreen() {
     }
   }
 
-  async function toggleAssignment(target: OrgMemberDoc, cardId: string) {
-    if (!orgId || !isOwner || target.role === 'owner') {
+  async function sendInvite() {
+    if (!inviteEmailLooksValid(email)) {
+      setError('Enter a valid email');
       return;
     }
-    const current = new Set(target.assignedCardIds ?? []);
-    if (current.has(cardId)) {
-      current.delete(cardId);
-    } else {
-      current.add(cardId);
-    }
-    const nextIds = [...current];
     setBusy(true);
     setError(null);
+    setMessage(null);
     try {
-      await setMemberAssignedCards(orgId, target.id, nextIds);
-      setMembers((prev) =>
-        prev.map((item) =>
-          item.id === target.id ? { ...item, assignedCardIds: nextIds } : item,
-        ),
-      );
-      await refresh();
+      await inviteEmail(email);
+      setMessage(`Invite sent to ${email.trim().toLowerCase()}`);
+      setEmail('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Assignment failed');
+      setError(err instanceof Error ? err.message : 'Invite failed');
     } finally {
       setBusy(false);
     }
   }
-
-  const myOutstanding = user ? outstanding[user.uid]?.outstanding : undefined;
 
   return (
     <ScrollView
       className="flex-1 bg-background"
       contentContainerStyle={{ paddingBottom: 40, paddingTop: insets.top }}>
       <View className="px-md pt-lg">
-        <Text className="text-sm font-medium uppercase tracking-wide text-muted">Workspace</Text>
-        <Text className="mt-sm text-2xl font-bold text-ink">{orgName ?? 'Workspace'}</Text>
-        <Text className="mt-sm text-base text-muted">
-          {isOwner
-            ? 'Outstanding balances and reimbursements.'
-            : 'Your outstanding balance and payments.'}
+        <Text className="text-sm font-medium uppercase tracking-wide text-muted">
+          {orgName ?? 'Workspace'}
         </Text>
-        {!isOwner && myOutstanding !== undefined ? (
-          <View className="mt-lg">
-            <Text className="text-sm font-medium uppercase tracking-wide text-muted">
-              Your outstanding
-            </Text>
-            <Text className="mt-sm text-4xl font-bold text-ink">{formatPkr(myOutstanding)}</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Record a payment"
-              className="mt-md items-center rounded-lg bg-ink px-md py-md"
-              onPress={() => openPayment(user!.uid)}>
-              <Text className="text-base font-semibold text-background">Record payment</Text>
-            </Pressable>
-          </View>
+        <View className="mt-lg">
+          <BalanceHero
+            amount={loading ? null : recoverable}
+            trusted
+            label={isOwner ? 'To recover' : 'Your outstanding'}
+            caption={
+              isOwner
+                ? 'Outstanding balances across the workspace.'
+                : 'Fuel attributed to you minus confirmed payments.'
+            }
+            loading={loading}
+          />
+        </View>
+        {!isOwner && user ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Record a payment"
+            className="mt-md items-center rounded-lg bg-ink px-md py-md"
+            onPress={() => openPayment(user.uid)}>
+            <Text className="text-base font-semibold text-background">Record payment</Text>
+          </Pressable>
         ) : null}
       </View>
 
@@ -262,10 +265,10 @@ export default function PeopleScreen() {
                 key={item.id}
                 className="mt-md rounded-lg border border-border bg-surface px-md py-md">
                 <Text className="text-base font-semibold text-ink">
-                  {formatPkr(item.amount)} · {METHOD_LABELS[item.method as keyof typeof METHOD_LABELS] ?? item.method}
+                  {formatPkr(item.amount)} · {settlementMethodLabel(item.method)}
                 </Text>
                 <Text className="mt-xs text-sm text-muted">
-                  {person?.displayName || person?.email || item.userId}
+                  {person ? personDisplayName(person) : item.userId}
                 </Text>
                 <Pressable
                   accessibilityRole="button"
@@ -291,8 +294,10 @@ export default function PeopleScreen() {
             onChangeText={setEmail}
             autoCapitalize="none"
             keyboardType="email-address"
+            autoCorrect={false}
             placeholder="name@email.com"
             placeholderTextColor={colors.muted}
+            accessibilityLabel="Invite email"
             className="mt-md rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
           />
           <Pressable
@@ -300,20 +305,7 @@ export default function PeopleScreen() {
             accessibilityLabel="Send invite"
             className="mt-md items-center rounded-lg bg-ink px-md py-md"
             disabled={busy || !email.trim()}
-            onPress={() => {
-              setBusy(true);
-              setError(null);
-              setMessage(null);
-              void inviteEmail(email)
-                .then(() => {
-                  setMessage(`Invite sent to ${email.trim().toLowerCase()}`);
-                  setEmail('');
-                })
-                .catch((err: unknown) => {
-                  setError(err instanceof Error ? err.message : 'Invite failed');
-                })
-                .finally(() => setBusy(false));
-            }}>
+            onPress={() => void sendInvite()}>
             <Text className="text-base font-semibold text-background">
               {busy ? 'Working…' : 'Send invite'}
             </Text>
@@ -324,197 +316,84 @@ export default function PeopleScreen() {
       <View className="mt-xl px-md">
         <Text className="text-sm font-medium uppercase tracking-wide text-muted">People</Text>
         {loading ? (
-          <View className="items-center py-xl">
-            <ActivityIndicator color={colors.accent} />
-          </View>
-        ) : members.length === 0 ? (
+          <PeopleSkeleton />
+        ) : listItems.length === 0 ? (
           <EmptyState title="No members" body="Invite someone to share this ledger." />
         ) : (
-          members.map((person) => {
-            const assigned = new Set(person.assignedCardIds ?? []);
-            const row = outstanding[person.id];
-            const showOutstanding = isOwner || person.id === user?.uid;
-            return (
-              <View
-                key={person.id}
-                className="mt-md rounded-lg border border-border bg-surface px-md py-md">
-                <Text className="text-lg font-semibold text-ink">
-                  {person.displayName || person.email}
-                </Text>
-                <Text className="mt-xs text-sm text-muted">
-                  {person.email} · {person.role}
-                </Text>
-                {showOutstanding && row ? (
-                  <View className="mt-md">
-                    <Text className="text-xs font-medium uppercase tracking-wide text-muted">
-                      Outstanding
-                    </Text>
-                    <Text className="mt-xs text-2xl font-bold text-ink">
-                      {formatPkr(row.outstanding)}
+          listItems.map((person) => {
+            const openable = isOwner || person.id === user?.uid;
+            const body = (
+              <>
+                <View className="flex-row items-start justify-between">
+                  <View className="flex-1 pr-md">
+                    <Text className="text-lg font-semibold text-ink">
+                      {personDisplayName(person)}
                     </Text>
                     <Text className="mt-xs text-sm text-muted">
-                      Fuel {formatPkr(row.fuelTotal)} · Settled {formatPkr(row.settledTotal)}
+                      {person.email} · {person.role}
                     </Text>
-                    {isOwner || person.id === user?.uid ? (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Record payment for ${person.displayName || person.email}`}
-                        className="mt-md items-center rounded-lg border border-border px-md py-sm"
-                        onPress={() => openPayment(person.id)}>
-                        <Text className="text-sm font-medium text-ink">Record payment</Text>
-                      </Pressable>
-                    ) : null}
                   </View>
-                ) : null}
-                {isOwner && person.role === 'member' ? (
-                  <View className="mt-md">
-                    <Text className="text-xs font-medium uppercase tracking-wide text-muted">
-                      Assigned cards
+                  {person.outstanding != null ? (
+                    <Text
+                      className="text-xl font-bold text-ink"
+                      accessibilityLabel={`Outstanding ${formatPkr(person.outstanding)}`}>
+                      {formatPkr(person.outstanding)}
                     </Text>
-                    {cards.length === 0 ? (
-                      <Text className="mt-sm text-sm text-muted">
-                        Add an active card first, then assign it here.
-                      </Text>
-                    ) : (
-                      <View className="mt-sm flex-row flex-wrap" style={{ gap: 8 }}>
-                        {cards.map((card) => {
-                          const selected = assigned.has(card.id);
-                          return (
-                            <Pressable
-                              key={card.id}
-                              accessibilityRole="button"
-                              accessibilityState={{ selected }}
-                              accessibilityLabel={`${selected ? 'Unassign' : 'Assign'} ${card.name}`}
-                              disabled={busy}
-                              className="rounded-lg border px-md py-sm"
-                              style={{
-                                borderColor: selected ? colors.accent : colors.border,
-                                backgroundColor: selected ? colors.accentSoft : colors.surface,
-                              }}
-                              onPress={() => void toggleAssignment(person, card.id)}>
-                              <Text
-                                className="text-sm font-medium"
-                                style={{ color: selected ? colors.accent : colors.ink }}>
-                                {card.name} · {card.last4}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                    )}
-                  </View>
-                ) : null}
-                {!isOwner && person.id !== user?.uid ? (
+                  ) : null}
+                </View>
+                {person.outstanding != null ? (
                   <Text className="mt-sm text-sm text-muted">
-                    {(person.assignedCardIds ?? []).length} card
-                    {(person.assignedCardIds ?? []).length === 1 ? '' : 's'} assigned
+                    Spent {formatPkr(person.fuelTotal ?? 0)} · Settled{' '}
+                    {formatPkr(person.settledTotal ?? 0)}
                   </Text>
-                ) : null}
-              </View>
+                ) : (
+                  <Text className="mt-sm text-sm text-muted">
+                    {assignedCardCountLabel(person.assignedCardIds.length)}
+                  </Text>
+                )}
+              </>
+            );
+
+            if (!openable) {
+              return (
+                <View
+                  key={person.id}
+                  className="mt-md rounded-lg border border-border bg-surface px-md py-md">
+                  {body}
+                </View>
+              );
+            }
+
+            return (
+              <Pressable
+                key={person.id}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${personDisplayName(person)}`}
+                className="mt-md rounded-lg border border-border bg-surface px-md py-md"
+                onPress={() => router.push(`/person/${person.id}`)}>
+                {body}
+              </Pressable>
             );
           })
         )}
       </View>
 
-      <Modal
+      <SettlementPaymentSheet
         visible={sheetOpen}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setSheetOpen(false)}>
-        <View className="flex-1 justify-end bg-black/40">
-          <ScrollView
-            className="max-h-[92%] rounded-t-2xl bg-background"
-            contentContainerStyle={{ padding: 16, paddingBottom: 40 + insets.bottom }}>
-            <Text className="text-xl font-semibold text-ink">Record payment</Text>
-            <Text className="mt-sm text-sm text-muted">
-              Settlements never change card balance. They reduce person outstanding only.
-            </Text>
-            <View className="mt-lg">
-              <AmountField value={amountText} onChangeText={setAmountText} />
-            </View>
-
-            {isOwner ? (
-              <>
-                <Text className="mt-lg text-sm font-medium uppercase tracking-wide text-muted">
-                  Person
-                </Text>
-                <View className="mt-sm flex-row flex-wrap" style={{ gap: 8 }}>
-                  {members.map((person) => {
-                    const selected = person.id === payUserId;
-                    return (
-                      <Pressable
-                        key={person.id}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected }}
-                        className="rounded-lg border px-md py-sm"
-                        style={{
-                          borderColor: selected ? colors.accent : colors.border,
-                          backgroundColor: selected ? colors.accentSoft : colors.surface,
-                        }}
-                        onPress={() => setPayUserId(person.id)}>
-                        <Text style={{ color: selected ? colors.accent : colors.ink }}>
-                          {person.displayName || person.email}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </>
-            ) : null}
-
-            <Text className="mt-lg text-sm font-medium uppercase tracking-wide text-muted">
-              Method
-            </Text>
-            <View className="mt-sm flex-row flex-wrap" style={{ gap: 8 }}>
-              {settlementMethods.map((item) => {
-                const selected = item === method;
-                return (
-                  <Pressable
-                    key={item}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    className="rounded-lg border px-md py-sm"
-                    style={{
-                      borderColor: selected ? colors.accent : colors.border,
-                      backgroundColor: selected ? colors.accentSoft : colors.surface,
-                    }}
-                    onPress={() => setMethod(item)}>
-                    <Text style={{ color: selected ? colors.accent : colors.ink }}>
-                      {METHOD_LABELS[item]}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <TextInput
-              value={notes}
-              onChangeText={setNotes}
-              placeholder="Notes (optional)"
-              placeholderTextColor={colors.muted}
-              className="mt-md rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
-            />
-
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Save settlement"
-              className="mt-xl items-center rounded-lg bg-ink px-md py-md"
-              disabled={busy}
-              onPress={() => void submitPayment()}>
-              <Text className="text-base font-semibold text-background">
-                {busy ? 'Saving…' : isOwner ? 'Confirm payment' : 'Submit for confirmation'}
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Cancel payment"
-              className="mt-md items-center py-md"
-              onPress={() => setSheetOpen(false)}>
-              <Text className="text-base text-muted">Cancel</Text>
-            </Pressable>
-          </ScrollView>
-        </View>
-      </Modal>
+        busy={busy}
+        isOwner={isOwner}
+        amountText={amountText}
+        method={method}
+        notes={notes}
+        payUserId={payUserId}
+        people={members}
+        onChangeAmount={setAmountText}
+        onChangeMethod={setMethod}
+        onChangeNotes={setNotes}
+        onChangePayUserId={setPayUserId}
+        onSubmit={() => void submitPayment()}
+        onClose={() => setSheetOpen(false)}
+      />
     </ScrollView>
   );
 }
