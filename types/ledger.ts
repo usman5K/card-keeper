@@ -57,6 +57,8 @@ export type Settlement = {
   confirmedBy?: string;
   occurredAt: unknown;
   createdAt?: unknown;
+  deviceId?: string;
+  notes?: string;
 };
 
 export type PinRequestStatus = 'pending' | 'approved' | 'rejected';
