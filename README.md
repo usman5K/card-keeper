@@ -20,9 +20,11 @@ npm run android
 npm run lint
 npm run typecheck
 npm test
+npm run test:functions
 npm run test:firebase-env
 npm run test:rules
 npm run deploy:rules
+npm run deploy:functions
 ```
 
 ## Firebase
@@ -32,6 +34,7 @@ npm run deploy:rules
 - Auth persistence: AsyncStorage on iOS/Android
 - Firestore: persistent cache on web; memory cache on native Expo Go until a durable offline path is added
 - Rules: `firestore.rules` + `firestore.indexes.json` (deploy with `npm run deploy:rules`)
+- Functions: card balance reconcile + conflict detection (`npm run deploy:functions`, Blaze plan required)
 - Rules tests need JDK 21+ (`openjdk@21`) and the Firestore emulator
 - Never commit `.env` or service-account files
 

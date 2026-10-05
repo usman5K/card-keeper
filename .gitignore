@@ -61,6 +61,8 @@ Thumbs.db
 
 # Firebase local
 .firebase/
+functions/lib/
+functions/node_modules/
 
 # EAS / builds
 *.apk
