@@ -126,12 +126,12 @@ export async function findPendingInvitesForEmail(email: string) {
     if (!orgRef) {
       continue;
     }
-    const orgSnap = await getDoc(orgRef);
+    const invite = inviteDoc.data() as OrgInvite;
     matches.push({
       orgId: orgRef.id,
-      orgName: orgSnap.exists() ? (orgSnap.data() as Organization).name : 'Workspace',
+      orgName: invite.orgName || 'Workspace',
       inviteId: inviteDoc.id,
-      invite: inviteDoc.data() as OrgInvite,
+      invite,
     });
   }
 
@@ -192,11 +192,17 @@ export async function inviteMemberByEmail(orgId: string, invitedBy: string, emai
     throw new Error('Enter a valid email');
   }
 
+  const org = await getOrganization(orgId);
+  if (!org) {
+    throw new Error('Workspace not found');
+  }
+
   const inviteRef = doc(collection(db, 'organizations', orgId, 'invites'));
   const invite: OrgInvite = {
     email: normalized,
     invitedBy,
     status: 'pending',
+    orgName: org.name,
     createdAt: serverTimestamp(),
   };
   await setDoc(inviteRef, invite);
