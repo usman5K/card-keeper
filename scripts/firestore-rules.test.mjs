@@ -117,6 +117,36 @@ await assertFails(
   }),
 );
 
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/recharges/r1'), {
+    cardId: 'card1',
+    amount: 5000,
+    createdBy: 'owner1',
+    occurredAt: '2026-10-05T00:00:00.000Z',
+  }),
+);
+
+await assertFails(
+  setDoc(doc(member.firestore(), 'organizations/org1/recharges/r2'), {
+    cardId: 'card1',
+    amount: 100,
+    createdBy: 'member1',
+    occurredAt: '2026-10-05T00:00:00.000Z',
+  }),
+);
+
+await assertSucceeds(getDoc(doc(member.firestore(), 'organizations/org1/recharges/r1')));
+
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/recharges/r3'), {
+    cardId: 'card2',
+    amount: 100,
+    createdBy: 'owner1',
+    occurredAt: '2026-10-05T00:00:00.000Z',
+  }),
+);
+await assertFails(getDoc(doc(member.firestore(), 'organizations/org1/recharges/r3')));
+
 const fresh = env.authenticatedContext('newbie', { email: 'new@example.com' });
 await assertSucceeds(
   setDoc(doc(fresh.firestore(), 'organizations/org2'), {
