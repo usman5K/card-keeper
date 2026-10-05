@@ -70,7 +70,9 @@ service cloud.firestore {
         allow update: if isOwner(orgId)
           || (memberId == uid()
             && isActiveMember(orgId)
-            && request.resource.data.role == resource.data.role);
+            && request.resource.data.role == resource.data.role
+            && request.resource.data.status == resource.data.status
+            && request.resource.data.assignedCardIds == resource.data.assignedCardIds);
         allow delete: if false;
       }
 
@@ -99,8 +101,15 @@ service cloud.firestore {
       }
 
       match /cards/{cardId} {
-        allow read: if isActiveMember(orgId);
-        allow create, update: if isOwner(orgId);
+        allow read: if isOwner(orgId)
+          || (isActiveMember(orgId)
+            && cardId in memberDoc(orgId).data.get('assignedCardIds', []));
+        allow create: if isOwner(orgId)
+          && request.resource.data.name is string
+          && request.resource.data.last4 is string
+          && request.resource.data.status in ['active', 'inactive'];
+        allow update: if isOwner(orgId)
+          && request.resource.data.status in ['active', 'inactive'];
         allow delete: if false;
       }
 

@@ -230,3 +230,32 @@ export async function getOrganization(orgId: string) {
   }
   return { id: snap.id, ...(snap.data() as Organization) };
 }
+
+export type OrgMemberDoc = OrgMember & { id: string };
+
+export async function listActiveMembers(orgId: string): Promise<OrgMemberDoc[]> {
+  const db = dbOrThrow();
+  const snap = await getDocs(collection(db, 'organizations', orgId, 'members'));
+  return snap.docs
+    .map((item) => ({ id: item.id, ...(item.data() as OrgMember) }))
+    .filter((member) => member.status === 'active')
+    .sort((a, b) => {
+      if (a.role !== b.role) {
+        return a.role === 'owner' ? -1 : 1;
+      }
+      return (a.displayName || a.email).localeCompare(b.displayName || b.email);
+    });
+}
+
+export async function setMemberAssignedCards(
+  orgId: string,
+  memberId: string,
+  assignedCardIds: string[],
+) {
+  const db = dbOrThrow();
+  const unique = [...new Set(assignedCardIds.filter(Boolean))];
+  await updateDoc(doc(db, 'organizations', orgId, 'members', memberId), {
+    assignedCardIds: unique,
+    updatedAt: serverTimestamp(),
+  });
+}
