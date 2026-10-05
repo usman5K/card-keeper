@@ -24,4 +24,16 @@ describe('balance projection', () => {
   it('projects person outstanding', () => {
     expect(projectOutstanding([1000, 500], [400])).toBe(1100);
   });
+
+  it('projects zero outstanding when fully settled', () => {
+    expect(projectOutstanding([2000], [1500, 500])).toBe(0);
+  });
+
+  it('allows negative outstanding after over-settlement', () => {
+    expect(projectOutstanding([1000], [1200])).toBe(-200);
+  });
+
+  it('ignores empty settlement list', () => {
+    expect(projectOutstanding([800, 200], [])).toBe(1000);
+  });
 });

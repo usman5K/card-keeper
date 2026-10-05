@@ -157,7 +157,43 @@ service cloud.firestore {
 
       match /settlements/{docId} {
         allow read: if isActiveMember(orgId);
-        allow create, update, delete: if false;
+
+        allow create: if isActiveMember(orgId)
+          && request.resource.data.userId is string
+          && request.resource.data.amount is int
+          && request.resource.data.amount > 0
+          && request.resource.data.method is string
+          && request.resource.data.status in ['pending', 'confirmed']
+          && request.resource.data.createdBy == uid()
+          && (
+            (
+              isOwner(orgId)
+              && (
+                request.resource.data.status == 'pending'
+                || (
+                  request.resource.data.status == 'confirmed'
+                  && request.resource.data.confirmedBy == uid()
+                )
+              )
+            )
+            || (
+              request.resource.data.userId == uid()
+              && request.resource.data.status == 'pending'
+            )
+          );
+
+        allow update: if isOwner(orgId)
+          && resource.data.status == 'pending'
+          && request.resource.data.status == 'confirmed'
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.amount is int
+          && request.resource.data.amount > 0
+          && request.resource.data.method is string
+          && request.resource.data.confirmedBy == uid()
+          && request.resource.data.occurredAt == resource.data.occurredAt;
+
+        allow delete: if false;
       }
 
       match /pinRequests/{docId} {

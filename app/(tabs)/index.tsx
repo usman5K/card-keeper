@@ -25,6 +25,7 @@ import {
 } from '@/features/fuel/fuelService';
 import { useOrg } from '@/features/org/OrgProvider';
 import { listActiveMembers, type OrgMemberDoc } from '@/features/org/orgService';
+import { getPersonOutstanding } from '@/features/settlements/settlementService';
 import { colors } from '@/theme/tokens';
 import type { FuelCardDoc } from '@/types/card';
 import { recentChips } from '@/utils/chips';
@@ -50,6 +51,7 @@ export default function HomeScreen() {
   const [area, setArea] = useState('');
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
+  const [myOutstanding, setMyOutstanding] = useState<number | null>(null);
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
@@ -76,12 +78,13 @@ export default function HomeScreen() {
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const [nextCards, nextTxs, nextPeople] = await Promise.all([
+          const [nextCards, nextTxs, nextPeople, outstanding] = await Promise.all([
             listVisibleCards(orgId, member),
             listRecentFuelTransactions(orgId, {
               userId: isOwner ? undefined : user.uid,
             }),
             isOwner ? listActiveMembers(orgId) : Promise.resolve([]),
+            getPersonOutstanding(orgId, user.uid),
           ]);
           if (cancelled) {
             return;
@@ -90,6 +93,7 @@ export default function HomeScreen() {
           setCards(activeCards);
           setTxs(nextTxs);
           setPeople(nextPeople);
+          setMyOutstanding(outstanding.outstanding);
           setError(null);
           setCardId((current) => current ?? activeCards[0]?.id ?? null);
           setUserId((current) => current ?? user.uid);
@@ -203,6 +207,13 @@ export default function HomeScreen() {
               ? `${selectedCard.name} preview. Server reconcile comes next.`
               : 'Add a card to start tracking balance.'}
           </Text>
+          {myOutstanding !== null ? (
+            <Link href="/(tabs)/people" accessibilityLabel="Open people outstanding">
+              <Text className="mt-md text-base text-muted">
+                Your outstanding {formatPkr(myOutstanding)}
+              </Text>
+            </Link>
+          ) : null}
 
           {error ? (
             <Text className="mt-md text-sm" style={{ color: colors.danger }}>

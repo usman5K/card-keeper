@@ -207,5 +207,75 @@ await assertSucceeds(
   }),
 );
 
+await assertSucceeds(
+  setDoc(doc(member.firestore(), 'organizations/org1/settlements/s1'), {
+    userId: 'member1',
+    amount: 500,
+    method: 'cash',
+    status: 'pending',
+    createdBy: 'member1',
+    occurredAt: '2026-10-05T12:00:00.000Z',
+  }),
+);
+
+await assertFails(
+  setDoc(doc(member.firestore(), 'organizations/org1/settlements/s2'), {
+    userId: 'owner1',
+    amount: 500,
+    method: 'cash',
+    status: 'pending',
+    createdBy: 'member1',
+    occurredAt: '2026-10-05T12:00:00.000Z',
+  }),
+);
+
+await assertFails(
+  setDoc(doc(member.firestore(), 'organizations/org1/settlements/s3'), {
+    userId: 'member1',
+    amount: 500,
+    method: 'cash',
+    status: 'confirmed',
+    createdBy: 'member1',
+    confirmedBy: 'member1',
+    occurredAt: '2026-10-05T12:00:00.000Z',
+  }),
+);
+
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/settlements/s4'), {
+    userId: 'member1',
+    amount: 700,
+    method: 'bank',
+    status: 'confirmed',
+    createdBy: 'owner1',
+    confirmedBy: 'owner1',
+    occurredAt: '2026-10-05T13:00:00.000Z',
+  }),
+);
+
+await assertSucceeds(
+  updateDoc(doc(owner.firestore(), 'organizations/org1/settlements/s1'), {
+    status: 'confirmed',
+    confirmedBy: 'owner1',
+    amount: 450,
+    method: 'cash',
+  }),
+);
+
+await assertFails(
+  updateDoc(doc(member.firestore(), 'organizations/org1/settlements/s4'), {
+    status: 'confirmed',
+    confirmedBy: 'member1',
+  }),
+);
+
+await assertFails(
+  updateDoc(doc(owner.firestore(), 'organizations/org1/settlements/s4'), {
+    amount: 1,
+  }),
+);
+
+await assertSucceeds(getDoc(doc(member.firestore(), 'organizations/org1/settlements/s4')));
+
 await env.cleanup();
 console.log('firestore rules tests ok');
