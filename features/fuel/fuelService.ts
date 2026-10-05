@@ -9,6 +9,7 @@ import {
   where,
 } from 'firebase/firestore';
 
+import { writeAuditLog } from '@/features/audit/auditService';
 import { fuelInputSchema, type FuelInput } from '@/features/fuel/fuelSchema';
 import { getFirestoreDb } from '@/firebase/firestore';
 import type { FuelTransaction } from '@/types/ledger';
@@ -66,6 +67,18 @@ export async function createFuelTransaction(
   }
 
   const ref = await addDoc(collection(dbOrThrow(), 'organizations', orgId, 'transactions'), tx);
+  await writeAuditLog(orgId, {
+    actorId: createdBy,
+    action: 'FUEL_CREATE',
+    entityType: 'fuel',
+    entityId: ref.id,
+    metadata: {
+      cardId: parsed.cardId,
+      userId: parsed.userId,
+      amount: parsed.amount,
+      station: parsed.station.trim(),
+    },
+  });
   return { id: ref.id, ...(tx as FuelTransaction) };
 }
 

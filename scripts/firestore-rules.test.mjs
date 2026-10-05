@@ -503,6 +503,54 @@ await assertFails(
   }),
 );
 
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/auditLogs/fuel1'), {
+    actorId: 'owner1',
+    action: 'FUEL_CREATE',
+    entityType: 'fuel',
+    entityId: 'tx1',
+    metadata: { cardId: 'card1', amount: 500, station: 'PSO' },
+    createdAt: Timestamp.now(),
+  }),
+);
+
+await assertSucceeds(
+  setDoc(doc(member.firestore(), 'organizations/org1/auditLogs/fuel2'), {
+    actorId: 'member1',
+    action: 'FUEL_CREATE',
+    entityType: 'fuel',
+    entityId: 'tx2',
+    metadata: { cardId: 'card1', amount: 200 },
+    createdAt: Timestamp.now(),
+  }),
+);
+
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/auditLogs/conflict1'), {
+    actorId: 'owner1',
+    action: 'CONFLICT_ACKNOWLEDGE',
+    entityType: 'transaction',
+    entityId: 'tx1',
+    metadata: { reviewAction: 'acknowledge' },
+    createdAt: Timestamp.now(),
+  }),
+);
+
+await assertFails(
+  setDoc(doc(member.firestore(), 'organizations/org1/auditLogs/badActor'), {
+    actorId: 'owner1',
+    action: 'FUEL_CREATE',
+    entityType: 'fuel',
+    entityId: 'tx3',
+    metadata: {},
+    createdAt: Timestamp.now(),
+  }),
+);
+
+await assertSucceeds(getDoc(doc(owner.firestore(), 'organizations/org1/auditLogs/fuel1')));
+await assertFails(getDoc(doc(member.firestore(), 'organizations/org1/auditLogs/fuel1')));
+await assertFails(getDoc(doc(stranger.firestore(), 'organizations/org1/auditLogs/fuel1')));
+
 await env.withSecurityRulesDisabled(async (context) => {
   const db = context.firestore();
   await setDoc(doc(db, 'organizations/org1/pinRequests/card1_member1'), {

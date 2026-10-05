@@ -1,11 +1,15 @@
-import { Redirect, Stack } from 'expo-router';
+import { Redirect, Stack, useRouter } from 'expo-router';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import { useAuth } from '@/features/auth/AuthProvider';
+import { useOrg } from '@/features/org/OrgProvider';
 import { colors } from '@/theme/tokens';
 
 export default function SettingsScreen() {
   const { user, signOut, loading } = useAuth();
+  const { member } = useOrg();
+  const router = useRouter();
+  const isOwner = member?.role === 'owner';
 
   if (loading) {
     return (
@@ -23,6 +27,18 @@ export default function SettingsScreen() {
     <View className="flex-1 bg-background px-md pt-lg">
       <Stack.Screen options={{ title: 'Settings' }} />
       <Text className="text-base text-ink">{user.email ?? user.uid}</Text>
+
+      {isOwner ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open audit log"
+          className="mt-xl items-center rounded-lg border px-md py-md"
+          style={{ borderColor: colors.border, backgroundColor: colors.surface }}
+          onPress={() => router.push('/audit')}>
+          <Text className="text-base font-semibold text-ink">Audit log</Text>
+        </Pressable>
+      ) : null}
+
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Sign out"

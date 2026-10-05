@@ -308,13 +308,13 @@ export default function CardsScreen() {
     setError(null);
     try {
       if (editing) {
-        await updateCard(orgId, editing.id, { name, last4, issuer });
+        await updateCard(orgId, user.uid, editing.id, { name, last4, issuer });
         const pinRaw = pinText.trim();
         if (pinRaw) {
           await setCardPin(orgId, user.uid, editing.id, pinRaw);
         }
       } else {
-        const card = await createCard(orgId, { name, last4, issuer });
+        const card = await createCard(orgId, user.uid, { name, last4, issuer });
         const openingRaw = openingText.trim();
         if (openingRaw) {
           const opening = parsePkrInput(openingRaw);
@@ -420,12 +420,12 @@ export default function CardsScreen() {
         style: 'destructive',
         onPress: () => {
           void (async () => {
-            if (!orgId) {
+            if (!orgId || !user) {
               return;
             }
             setBusy(true);
             try {
-              await updateCard(orgId, card.id, { status: 'inactive' });
+              await updateCard(orgId, user.uid, card.id, { status: 'inactive' });
               setFormOpen(false);
               reload();
             } catch (err) {
@@ -440,12 +440,12 @@ export default function CardsScreen() {
   }
 
   async function reactivate(card: FuelCardDoc) {
-    if (!orgId) {
+    if (!orgId || !user) {
       return;
     }
     setBusy(true);
     try {
-      await updateCard(orgId, card.id, { status: 'active' });
+      await updateCard(orgId, user.uid, card.id, { status: 'active' });
       setFormOpen(false);
       reload();
     } catch (err) {

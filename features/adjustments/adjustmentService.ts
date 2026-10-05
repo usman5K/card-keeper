@@ -9,6 +9,7 @@ import {
   where,
 } from 'firebase/firestore';
 
+import { writeAuditLog } from '@/features/audit/auditService';
 import {
   adjustmentInputSchema,
   type AdjustmentInput,
@@ -51,6 +52,18 @@ export async function createAdjustment(
     collection(dbOrThrow(), 'organizations', orgId, 'adjustments'),
     row,
   );
+  await writeAuditLog(orgId, {
+    actorId: createdBy,
+    action: 'ADJUSTMENT_CREATE',
+    entityType: 'adjustment',
+    entityId: ref.id,
+    metadata: {
+      cardId: parsed.cardId,
+      amount: parsed.amount,
+      kind: parsed.kind,
+      ...(parsed.linkedTxId ? { linkedTxId: parsed.linkedTxId } : {}),
+    },
+  });
   return { id: ref.id, ...(row as Adjustment) };
 }
 

@@ -8,6 +8,7 @@ import {
   where,
 } from 'firebase/firestore';
 
+import { writeAuditLog } from '@/features/audit/auditService';
 import { rechargeInputSchema, type RechargeInput } from '@/features/recharges/rechargeSchema';
 import { getFirestoreDb } from '@/firebase/firestore';
 import type { Recharge } from '@/types/ledger';
@@ -48,6 +49,13 @@ export async function createRecharge(
   }
 
   const ref = await addDoc(collection(dbOrThrow(), 'organizations', orgId, 'recharges'), refill);
+  await writeAuditLog(orgId, {
+    actorId: createdBy,
+    action: 'RECHARGE_CREATE',
+    entityType: 'recharge',
+    entityId: ref.id,
+    metadata: { cardId: parsed.cardId, amount: parsed.amount },
+  });
   return { id: ref.id, ...(refill as Recharge) };
 }
 

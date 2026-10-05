@@ -12,6 +12,7 @@ import {
   where,
 } from 'firebase/firestore';
 
+import { writeAuditLog } from '@/features/audit/auditService';
 import {
   PIN_REVEAL_MINUTES,
   pinRequestCreateSchema,
@@ -20,8 +21,8 @@ import {
   pinValueSchema,
 } from '@/features/pin/pinSchema';
 import { getFirestoreDb } from '@/firebase/firestore';
-import type { PinAuditAction, PinRequest } from '@/types/ledger';
-import { redactSecrets, safeLog } from '@/utils/safeLog';
+import type { AuditAction } from '@/types/audit';
+import type { PinRequest } from '@/types/ledger';
 
 export type PinRequestDoc = PinRequest & { id: string };
 
@@ -48,21 +49,20 @@ function revealExpiry() {
 async function writePinAudit(
   orgId: string,
   actorId: string,
-  action: PinAuditAction,
+  action: Extract<
+    AuditAction,
+    'PIN_REQUEST' | 'PIN_APPROVE' | 'PIN_REJECT' | 'PIN_SHARE'
+  >,
   entityId: string,
   metadata: Record<string, unknown>,
 ) {
-  const safeMeta = redactSecrets(metadata);
-  const ref = doc(collection(dbOrThrow(), 'organizations', orgId, 'auditLogs'));
-  await setDoc(ref, {
+  await writeAuditLog(orgId, {
     actorId,
     action,
     entityType: 'pinRequest',
     entityId,
-    metadata: safeMeta,
-    createdAt: serverTimestamp(),
+    metadata,
   });
-  safeLog('pin audit', { orgId, action, entityId, actorId, metadata: safeMeta });
 }
 
 export async function setCardPin(orgId: string, actorId: string, cardId: string, pin: string) {
@@ -76,7 +76,13 @@ export async function setCardPin(orgId: string, actorId: string, cardId: string,
     hasPin: true,
     updatedAt: serverTimestamp(),
   });
-  await writePinAudit(orgId, actorId, 'PIN_SET', cardId, { cardId });
+  await writeAuditLog(orgId, {
+    actorId,
+    action: 'PIN_SET',
+    entityType: 'card',
+    entityId: cardId,
+    metadata: { cardId },
+  });
 }
 
 export async function getCardPin(orgId: string, cardId: string) {

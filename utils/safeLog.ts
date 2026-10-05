@@ -31,6 +31,27 @@ export function redactSecrets<T>(input: T): T {
   return out as T;
 }
 
+export function omitSecrets(input: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (isSecretKey(key)) {
+      continue;
+    }
+    if (value != null && typeof value === 'object' && !Array.isArray(value)) {
+      out[key] = omitSecrets(value as Record<string, unknown>);
+    } else if (Array.isArray(value)) {
+      out[key] = value.map((item) =>
+        item != null && typeof item === 'object' && !Array.isArray(item)
+          ? omitSecrets(item as Record<string, unknown>)
+          : item,
+      );
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 export function safeLog(message: string, meta?: Record<string, unknown>) {
   if (meta) {
     console.log(message, redactSecrets(meta));

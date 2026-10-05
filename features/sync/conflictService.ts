@@ -14,7 +14,9 @@ import {
   createAdjustment,
   reverseFuelTransaction,
 } from '@/features/adjustments/adjustmentService';
+import { writeAuditLog } from '@/features/audit/auditService';
 import { getFirestoreDb } from '@/firebase/firestore';
+import type { AuditAction } from '@/types/audit';
 import type { FuelTransaction } from '@/types/ledger';
 
 export type ConflictFuelDoc = FuelTransaction & { id: string };
@@ -27,6 +29,16 @@ function dbOrThrow() {
     throw new Error('Firestore is not configured');
   }
   return db;
+}
+
+function conflictAuditAction(action: ConflictReviewAction): AuditAction {
+  if (action === 'reverse') {
+    return 'CONFLICT_REVERSE';
+  }
+  if (action === 'adjust') {
+    return 'CONFLICT_ADJUST';
+  }
+  return 'CONFLICT_ACKNOWLEDGE';
 }
 
 export async function listConflictFuelTransactions(orgId: string, max = 50) {
@@ -56,6 +68,13 @@ export async function acknowledgeConflict(
     reviewedBy,
     reviewedAt: serverTimestamp(),
     reviewAction: action,
+  });
+  await writeAuditLog(orgId, {
+    actorId: reviewedBy,
+    action: conflictAuditAction(action),
+    entityType: 'transaction',
+    entityId: fuelId,
+    metadata: { reviewAction: action },
   });
 }
 
