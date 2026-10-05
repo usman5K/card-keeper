@@ -9,7 +9,7 @@ npm install
 cp .env.example .env
 ```
 
-Fill `EXPO_PUBLIC_FIREBASE_*` from your Firebase web app settings. The app boots without them, but Auth/Firestore stay inactive until they are set.
+Fill `EXPO_PUBLIC_FIREBASE_*` and Google client IDs from Firebase / Google Cloud. See local `uncommit-docs/SETUP.md` for step-by-step setup.
 
 ## Scripts
 

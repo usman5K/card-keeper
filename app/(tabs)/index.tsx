@@ -24,6 +24,7 @@ export default function HomeScreen() {
       <Text className="mt-sm text-base text-muted">
         Placeholder hero. Fuel entries will land here.
       </Text>
+      <Text className="mt-md text-sm text-muted">Workspace loads after Firebase is configured.</Text>
 
       <View className="mt-xl">
         <Host matchContents>
