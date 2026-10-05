@@ -7,7 +7,10 @@ type EmptyStateProps = {
 
 export function EmptyState({ title, body }: EmptyStateProps) {
   return (
-    <View className="items-center px-md py-xl">
+    <View
+      className="items-center px-md py-xl"
+      accessibilityRole="summary"
+      accessibilityLabel={`${title}. ${body}`}>
       <Text className="text-lg font-semibold text-ink">{title}</Text>
       <Text className="mt-sm text-center text-base text-muted">{body}</Text>
     </View>

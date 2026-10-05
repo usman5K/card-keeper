@@ -21,7 +21,8 @@ import {
   listPendingSettlements,
   type SettlementDoc,
 } from '@/features/settlements/settlementService';
-import { colors } from '@/theme/tokens';
+import { useSync } from '@/features/sync/SyncProvider';
+import { a11y, colors } from '@/theme/tokens';
 import { formatPkr, parsePkrInput } from '@/utils/money';
 import {
   assignedCardCountLabel,
@@ -37,6 +38,7 @@ import {
 export default function PeopleScreen() {
   const { user } = useAuth();
   const { orgId, orgName, member, inviteEmail } = useOrg();
+  const { isOnline } = useSync();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const isOwner = member?.role === 'owner';
@@ -239,16 +241,43 @@ export default function PeopleScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Record a payment"
-            className="mt-md items-center rounded-lg bg-ink px-md py-md"
+            className="mt-md items-center rounded-lg bg-ink px-md"
+            style={({ pressed }) => ({
+              minHeight: a11y.minHit,
+              justifyContent: 'center',
+              opacity: pressed ? 0.88 : 1,
+            })}
             onPress={() => openPayment(user.uid)}>
             <Text className="text-base font-semibold text-background">Record payment</Text>
           </Pressable>
         ) : null}
       </View>
 
-      {error ? (
+      {error && !loading && listItems.length === 0 ? (
+        <View className="px-md pt-lg">
+          <EmptyState title="Could not load people" body={error} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading people"
+            className="mt-md items-center rounded-lg border border-border px-md"
+            style={{ minHeight: a11y.minHit, justifyContent: 'center' }}
+            onPress={() => {
+              setLoading(true);
+              setError(null);
+              setReloadKey((value) => value + 1);
+            }}>
+            <Text className="text-base font-medium text-ink">Try again</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {error && listItems.length > 0 ? (
         <Text className="px-md pt-md text-sm" style={{ color: colors.danger }}>
           {error}
+        </Text>
+      ) : null}
+      {!isOnline ? (
+        <Text className="px-md pt-md text-sm" style={{ color: colors.offline }}>
+          Offline. Outstanding amounts may be last known.
         </Text>
       ) : null}
       {message ? <Text className="px-md pt-md text-sm text-online">{message}</Text> : null}
@@ -273,7 +302,8 @@ export default function PeopleScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Confirm settlement"
-                  className="mt-md items-center rounded-lg bg-accent px-md py-sm"
+                  className="mt-md items-center justify-center rounded-lg bg-accent px-md"
+                  style={{ minHeight: a11y.minHit }}
                   disabled={busy}
                   onPress={() => void approvePending(item)}>
                   <Text className="text-sm font-semibold text-background">Confirm</Text>
@@ -317,9 +347,9 @@ export default function PeopleScreen() {
         <Text className="text-sm font-medium uppercase tracking-wide text-muted">People</Text>
         {loading ? (
           <PeopleSkeleton />
-        ) : listItems.length === 0 ? (
+        ) : listItems.length === 0 && !error ? (
           <EmptyState title="No members" body="Invite someone to share this ledger." />
-        ) : (
+        ) : listItems.length === 0 ? null : (
           listItems.map((person) => {
             const openable = isOwner || person.id === user?.uid;
             const body = (

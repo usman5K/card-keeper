@@ -14,7 +14,7 @@ import {
   loadReportLookups,
 } from '@/features/reports/reportService';
 import { useSync } from '@/features/sync/SyncProvider';
-import { colors } from '@/theme/tokens';
+import { a11y, colors } from '@/theme/tokens';
 import { formatPkr } from '@/utils/money';
 import {
   buildExportRows,
@@ -45,7 +45,7 @@ const GROUP_KINDS: ReportGroupKind[] = [
 export default function ReportsScreen() {
   const { user } = useAuth();
   const { orgId, orgName, member } = useOrg();
-  const { balanceTrusted } = useSync();
+  const { balanceTrusted, isOnline } = useSync();
   const insets = useSafeAreaInsets();
   const isOwner = member?.role === 'owner';
 
@@ -195,12 +195,10 @@ export default function ReportsScreen() {
 
       {!loading && loadError ? (
         <View className="mt-lg">
-          <Text className="text-base" style={{ color: colors.danger }}>
-            {loadError}
-          </Text>
+          <EmptyState title="Could not load reports" body={loadError} />
           <Pressable
-            className="mt-md self-start rounded-lg px-md py-sm"
-            style={{ backgroundColor: colors.accentSoft }}
+            className="mt-md self-start items-center justify-center rounded-lg px-md"
+            style={{ backgroundColor: colors.accentSoft, minHeight: a11y.minHit }}
             onPress={() => setReloadKey((value) => value + 1)}
             accessibilityRole="button"
             accessibilityLabel="Retry loading reports">
@@ -209,6 +207,12 @@ export default function ReportsScreen() {
             </Text>
           </Pressable>
         </View>
+      ) : null}
+
+      {!loading && !loadError && !isOnline ? (
+        <Text className="mt-md text-sm" style={{ color: colors.offline }}>
+          Offline. Report totals may be last known.
+        </Text>
       ) : null}
 
       {!loading && !loadError ? (
@@ -222,8 +226,9 @@ export default function ReportsScreen() {
                   <Pressable
                     key={option.value}
                     onPress={() => setPeriod(option.value)}
-                    className="rounded-lg px-md py-sm"
+                    className="items-center justify-center rounded-lg px-md"
                     style={{
+                      minHeight: a11y.minHit,
                       backgroundColor: selected ? colors.accent : colors.surface,
                       borderWidth: 1,
                       borderColor: selected ? colors.accent : colors.border,
@@ -268,8 +273,9 @@ export default function ReportsScreen() {
                     <Pressable
                       key={kind}
                       onPress={() => setGroupKind(kind)}
-                      className="rounded-lg px-md py-sm"
+                      className="items-center justify-center rounded-lg px-md"
                       style={{
+                        minHeight: a11y.minHit,
                         backgroundColor: selected ? colors.accentSoft : colors.surface,
                         borderWidth: 1,
                         borderColor: selected ? colors.accent : colors.border,
@@ -324,13 +330,14 @@ export default function ReportsScreen() {
           </View>
 
           <Pressable
-            className="mt-xl items-center rounded-xl py-md"
-            style={{
+            className="mt-xl items-center justify-center rounded-xl px-md"
+            style={({ pressed }) => ({
               backgroundColor: colors.surface,
               borderWidth: 1,
               borderColor: colors.border,
-              opacity: exporting ? 0.6 : 1,
-            }}
+              minHeight: a11y.minHit,
+              opacity: exporting ? 0.6 : pressed ? 0.88 : 1,
+            })}
             disabled={exporting}
             onPress={() => {
               void onExport();

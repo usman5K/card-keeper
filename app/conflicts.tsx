@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -12,6 +11,7 @@ import {
 import { Stack, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ConfirmSheet } from '@/components/ConfirmSheet';
 import { EmptyState } from '@/components/EmptyState';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { useOrg } from '@/features/org/OrgProvider';
@@ -23,9 +23,16 @@ import {
   resolveConflictWithReverse,
   type ConflictFuelDoc,
 } from '@/features/sync/conflictService';
-import { colors } from '@/theme/tokens';
+import { a11y, colors } from '@/theme/tokens';
 import { formatPkr, parsePkrInput } from '@/utils/money';
 
+type PendingConfirm = {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  run: () => Promise<void>;
+};
 export default function ConflictsScreen() {
   const { user } = useAuth();
   const { orgId, member } = useOrg();
@@ -41,6 +48,7 @@ export default function ConflictsScreen() {
   const [amountText, setAmountText] = useState('');
   const [reason, setReason] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+  const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,64 +91,50 @@ export default function ConflictsScreen() {
   }
 
   function confirmAcknowledge(item: ConflictFuelDoc) {
-    Alert.alert(
-      'Acknowledge conflict',
-      `Mark ${formatPkr(item.amount)} at ${item.station} as reviewed without reversing it?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Acknowledge',
-          onPress: () => {
-            void (async () => {
-              if (!orgId || !user) {
-                return;
-              }
-              setBusy(true);
-              setError(null);
-              try {
-                await acknowledgeConflict(orgId, user.uid, item.id, 'acknowledge');
-                afterResolve();
-              } catch (err) {
-                setError(err instanceof Error ? err.message : 'Acknowledge failed');
-              } finally {
-                setBusy(false);
-              }
-            })();
-          },
-        },
-      ],
-    );
+    setConfirm({
+      title: 'Acknowledge conflict',
+      body: `Mark ${formatPkr(item.amount)} at ${item.station} as reviewed without reversing it?`,
+      confirmLabel: 'Acknowledge',
+      run: async () => {
+        if (!orgId || !user) {
+          return;
+        }
+        setBusy(true);
+        setError(null);
+        try {
+          await acknowledgeConflict(orgId, user.uid, item.id, 'acknowledge');
+          afterResolve();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Acknowledge failed');
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
   }
 
   function confirmReverse(item: ConflictFuelDoc) {
-    Alert.alert(
-      'Reverse fuel',
-      `Create a reversal for ${formatPkr(item.amount)} at ${item.station}? The original entry stays on the ledger.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reverse fuel',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              if (!orgId || !user) {
-                return;
-              }
-              setBusy(true);
-              setError(null);
-              try {
-                await resolveConflictWithReverse(orgId, user.uid, item);
-                afterResolve();
-              } catch (err) {
-                setError(err instanceof Error ? err.message : 'Reverse failed');
-              } finally {
-                setBusy(false);
-              }
-            })();
-          },
-        },
-      ],
-    );
+    setConfirm({
+      title: 'Reverse fuel',
+      body: `Create a reversal for ${formatPkr(item.amount)} at ${item.station}? The original entry stays on the ledger.`,
+      confirmLabel: 'Reverse fuel',
+      destructive: true,
+      run: async () => {
+        if (!orgId || !user) {
+          return;
+        }
+        setBusy(true);
+        setError(null);
+        try {
+          await resolveConflictWithReverse(orgId, user.uid, item);
+          afterResolve();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Reverse failed');
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
   }
 
   async function submitAdjust() {
@@ -179,7 +173,9 @@ export default function ConflictsScreen() {
         />
         <Pressable
           accessibilityRole="button"
-          className="mt-lg items-center py-md"
+          accessibilityLabel="Go back"
+          className="mt-lg items-center justify-center py-md"
+          style={{ minHeight: a11y.minHit }}
           onPress={() => router.back()}>
           <Text className="text-base text-muted">Go back</Text>
         </Pressable>
@@ -190,13 +186,29 @@ export default function ConflictsScreen() {
   return (
     <View className="flex-1 bg-background" style={{ paddingBottom: insets.bottom }}>
       <Stack.Screen options={{ title: 'Conflict review' }} />
-      {error ? (
+      {error && items.length > 0 ? (
         <Text className="px-md pt-md text-sm" style={{ color: colors.danger }}>
           {error}
         </Text>
       ) : null}
       {loading ? (
         <ActivityIndicator className="mt-xl" color={colors.accent} />
+      ) : error && items.length === 0 ? (
+        <View className="px-md pt-lg">
+          <EmptyState title="Could not load conflicts" body={error} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading conflicts"
+            className="mt-md items-center rounded-lg border border-border px-md"
+            style={{ minHeight: a11y.minHit, justifyContent: 'center' }}
+            onPress={() => {
+              setLoading(true);
+              setError(null);
+              setReloadKey((value) => value + 1);
+            }}>
+            <Text className="text-base font-medium text-ink">Try again</Text>
+          </Pressable>
+        </View>
       ) : (
         <FlatList
           data={items}
@@ -221,7 +233,8 @@ export default function ConflictsScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Acknowledge conflict ${item.station}`}
-                  className="rounded-lg border border-border px-md py-sm"
+                  className="items-center justify-center rounded-lg border border-border px-md"
+                  style={{ minHeight: a11y.minHit }}
                   disabled={busy}
                   onPress={() => confirmAcknowledge(item)}>
                   <Text className="text-sm font-medium text-ink">Acknowledge</Text>
@@ -229,8 +242,8 @@ export default function ConflictsScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Reverse conflict ${item.station}`}
-                  className="rounded-lg border px-md py-sm"
-                  style={{ borderColor: colors.danger }}
+                  className="items-center justify-center rounded-lg border px-md"
+                  style={{ borderColor: colors.danger, minHeight: a11y.minHit }}
                   disabled={busy}
                   onPress={() => confirmReverse(item)}>
                   <Text className="text-sm font-medium" style={{ color: colors.danger }}>
@@ -240,7 +253,8 @@ export default function ConflictsScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Adjust conflict ${item.station}`}
-                  className="rounded-lg bg-ink px-md py-sm"
+                  className="items-center justify-center rounded-lg bg-ink px-md"
+                  style={{ minHeight: a11y.minHit }}
                   disabled={busy}
                   onPress={() => {
                     setAdjustTarget(item);
@@ -254,6 +268,30 @@ export default function ConflictsScreen() {
           )}
         />
       )}
+
+      <ConfirmSheet
+        visible={confirm != null}
+        title={confirm?.title ?? ''}
+        body={confirm?.body ?? ''}
+        confirmLabel={confirm?.confirmLabel ?? ''}
+        destructive={confirm?.destructive}
+        busy={busy}
+        onCancel={() => {
+          if (!busy) {
+            setConfirm(null);
+          }
+        }}
+        onConfirm={() => {
+          const run = confirm?.run;
+          if (!run) {
+            return;
+          }
+          void (async () => {
+            await run();
+            setConfirm(null);
+          })();
+        }}
+      />
 
       <Modal
         visible={adjustTarget != null}
