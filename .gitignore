@@ -1,0 +1,88 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Expo / Metro
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+.metro-health-check*
+
+# Native / credentials
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+google-services.json
+GoogleService-Info.plist
+*-firebase-adminsdk-*.json
+serviceAccount*.json
+*.keystore
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs / debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+pubsub-debug.log
+*.log
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# TypeScript
+*.tsbuildinfo
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Firebase local
+.firebase/
+
+# EAS / builds
+*.apk
+*.aab
+*.ipa
+ios/Pods/
+ios/build/
+android/app/build/
+android/build/
+android/.gradle/
+
+# Internal agent / planning docs (keep local; public repo stays product-only)
+agent.md
+AGENTS.md
+architecture.md
+tasks.md
+uncommit-docs/
+.cursor/
+
+# Kotlin
+.kotlin/
+
+# Generated native folders
+/ios
+/android
