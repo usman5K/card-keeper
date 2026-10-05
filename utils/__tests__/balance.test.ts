@@ -21,6 +21,25 @@ describe('balance projection', () => {
     });
   });
 
+  it('applies fuel and recharge reversals as signed adjustments', () => {
+    const result = projectCardBalance([
+      { kind: 'ADJUSTMENT', amount: 8000, adjustmentKind: 'OPENING' },
+      { kind: 'RECHARGE', amount: 2000 },
+      { kind: 'FUEL', amount: 1500, syncStatus: 'SYNCED' },
+      { kind: 'ADJUSTMENT', amount: 1500, adjustmentKind: 'REVERSAL' },
+      { kind: 'ADJUSTMENT', amount: -2000, adjustmentKind: 'REVERSAL' },
+    ]);
+
+    expect(result).toEqual({
+      opening: 8000,
+      recharges: 2000,
+      fuel: 1500,
+      adjustments: -500,
+      balance: 8000,
+      pendingFuel: 0,
+    });
+  });
+
   it('projects person outstanding', () => {
     expect(projectOutstanding([1000, 500], [400])).toBe(1100);
   });

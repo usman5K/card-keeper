@@ -151,8 +151,23 @@ service cloud.firestore {
       }
 
       match /adjustments/{docId} {
-        allow read: if isActiveMember(orgId);
-        allow create, update, delete: if false;
+        allow read: if isOwner(orgId)
+          || (isActiveMember(orgId)
+            && resource.data.cardId in memberDoc(orgId).data.get('assignedCardIds', []));
+
+        allow create: if isOwner(orgId)
+          && request.resource.data.cardId is string
+          && request.resource.data.amount is int
+          && request.resource.data.amount != 0
+          && request.resource.data.reason is string
+          && request.resource.data.kind in ['OPENING', 'REVERSAL', 'CORRECTION']
+          && request.resource.data.createdBy == uid()
+          && (
+            (request.resource.data.kind == 'OPENING' && request.resource.data.amount > 0)
+            || request.resource.data.kind in ['REVERSAL', 'CORRECTION']
+          );
+
+        allow update, delete: if false;
       }
 
       match /settlements/{docId} {

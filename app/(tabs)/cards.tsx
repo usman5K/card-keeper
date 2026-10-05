@@ -13,6 +13,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AmountField } from '@/components/AmountField';
 import { EmptyState } from '@/components/EmptyState';
+import {
+  createOpeningBalance,
+  listAdjustmentsForCard,
+  reverseRecharge,
+  type AdjustmentDoc,
+} from '@/features/adjustments/adjustmentService';
 import { useAuth } from '@/features/auth/AuthProvider';
 import {
   createCard,
@@ -29,6 +35,10 @@ import { colors } from '@/theme/tokens';
 import type { FuelCardDoc } from '@/types/card';
 import { formatPkr, parsePkrInput } from '@/utils/money';
 
+type TimelineItem =
+  | { kind: 'recharge'; occurredAt: string; item: RechargeDoc }
+  | { kind: 'adjustment'; occurredAt: string; item: AdjustmentDoc };
+
 export default function CardsScreen() {
   const { user } = useAuth();
   const { ready: orgReady, orgId, member, refresh } = useOrg();
@@ -42,6 +52,7 @@ export default function CardsScreen() {
   const [name, setName] = useState('');
   const [last4, setLast4] = useState('');
   const [issuer, setIssuer] = useState('');
+  const [openingText, setOpeningText] = useState('');
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [rechargeOpen, setRechargeOpen] = useState(false);
@@ -49,8 +60,12 @@ export default function CardsScreen() {
   const [amountText, setAmountText] = useState('');
   const [source, setSource] = useState('');
   const [notes, setNotes] = useState('');
-  const [timeline, setTimeline] = useState<RechargeDoc[]>([]);
+  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
+  const [reversedIds, setReversedIds] = useState<Set<string>>(new Set());
+  const [hasOpening, setHasOpening] = useState(false);
+  const [openingOpen, setOpeningOpen] = useState(false);
+  const [openingOnlyText, setOpeningOnlyText] = useState('');
 
   useEffect(() => {
     if (!orgReady) {
@@ -109,11 +124,36 @@ export default function CardsScreen() {
     }
     setTimelineLoading(true);
     try {
-      const next = await listRechargesForCard(orgId, card.id);
-      setTimeline(next);
+      const [recharges, adjustments] = await Promise.all([
+        listRechargesForCard(orgId, card.id),
+        listAdjustmentsForCard(orgId, card.id),
+      ]);
+      const linked = new Set(
+        adjustments
+          .filter((item) => item.kind === 'REVERSAL' && item.linkedTxId)
+          .map((item) => item.linkedTxId as string),
+      );
+      setReversedIds(linked);
+      setHasOpening(adjustments.some((item) => item.kind === 'OPENING'));
+      const merged: TimelineItem[] = [
+        ...recharges.map((item) => ({
+          kind: 'recharge' as const,
+          occurredAt: String(item.occurredAt ?? ''),
+          item,
+        })),
+        ...adjustments.map((item) => ({
+          kind: 'adjustment' as const,
+          occurredAt: String(item.occurredAt ?? ''),
+          item,
+        })),
+      ];
+      merged.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+      setTimeline(merged);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load recharges');
+      setError(err instanceof Error ? err.message : 'Could not load card activity');
       setTimeline([]);
+      setReversedIds(new Set());
+      setHasOpening(false);
     } finally {
       setTimelineLoading(false);
     }
@@ -124,7 +164,10 @@ export default function CardsScreen() {
     setName('');
     setLast4('');
     setIssuer('');
+    setOpeningText('');
     setTimeline([]);
+    setReversedIds(new Set());
+    setHasOpening(false);
     setFormOpen(true);
   }
 
@@ -146,7 +189,7 @@ export default function CardsScreen() {
   }
 
   async function saveCard() {
-    if (!orgId || !isOwner) {
+    if (!orgId || !user || !isOwner) {
       return;
     }
     setBusy(true);
@@ -155,13 +198,70 @@ export default function CardsScreen() {
       if (editing) {
         await updateCard(orgId, editing.id, { name, last4, issuer });
       } else {
-        await createCard(orgId, { name, last4, issuer });
+        const card = await createCard(orgId, { name, last4, issuer });
+        const openingRaw = openingText.trim();
+        if (openingRaw) {
+          const opening = parsePkrInput(openingRaw);
+          if (opening > 0) {
+            await createOpeningBalance(orgId, user.uid, card.id, opening);
+          }
+        }
       }
       setFormOpen(false);
       reload();
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function confirmReverseRecharge(item: RechargeDoc) {
+    Alert.alert(
+      'Reverse recharge',
+      `Create a reversal for ${formatPkr(item.amount)}? The original recharge stays on the ledger.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reverse recharge',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              if (!orgId || !user || !editing) {
+                return;
+              }
+              setBusy(true);
+              setError(null);
+              try {
+                await reverseRecharge(orgId, user.uid, item);
+                await loadTimeline(editing);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Reverse failed');
+              } finally {
+                setBusy(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }
+
+  async function saveOpeningOnly() {
+    if (!orgId || !user || !editing) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const amount = parsePkrInput(openingOnlyText);
+      await createOpeningBalance(orgId, user.uid, editing.id, amount);
+      setOpeningOpen(false);
+      setOpeningOnlyText('');
+      await loadTimeline(editing);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Opening balance failed');
     } finally {
       setBusy(false);
     }
@@ -350,6 +450,14 @@ export default function CardsScreen() {
                   placeholderTextColor={colors.muted}
                   className="mt-md rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
                 />
+                {!editing ? (
+                  <View className="mt-md">
+                    <Text className="mb-sm text-sm font-medium uppercase tracking-wide text-muted">
+                      Opening balance (optional)
+                    </Text>
+                    <AmountField value={openingText} onChangeText={setOpeningText} />
+                  </View>
+                ) : null}
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Save card"
@@ -366,24 +474,57 @@ export default function CardsScreen() {
             {editing ? (
               <View className="mt-lg">
                 <Text className="text-sm font-medium uppercase tracking-wide text-muted">
-                  Recent recharges
+                  Card activity
                 </Text>
                 {timelineLoading ? (
                   <ActivityIndicator className="mt-md" color={colors.accent} />
                 ) : timeline.length === 0 ? (
-                  <Text className="mt-sm text-sm text-muted">No recharges yet.</Text>
+                  <Text className="mt-sm text-sm text-muted">No recharges or adjustments yet.</Text>
                 ) : (
-                  timeline.map((item) => (
-                    <View key={item.id} className="mt-sm border-b border-border py-sm">
-                      <Text className="text-base font-semibold text-ink">
-                        {formatPkr(item.amount)}
-                      </Text>
-                      <Text className="text-sm text-muted">
-                        {item.month ?? ''}
-                        {item.source ? ` · ${item.source}` : ''}
-                      </Text>
-                    </View>
-                  ))
+                  timeline.map((entry) => {
+                    if (entry.kind === 'recharge') {
+                      const item = entry.item;
+                      const alreadyReversed = reversedIds.has(item.id);
+                      return (
+                        <View key={`r-${item.id}`} className="mt-sm border-b border-border py-sm">
+                          <Text className="text-base font-semibold text-ink">
+                            {formatPkr(item.amount)}
+                          </Text>
+                          <Text className="text-sm text-muted">
+                            Recharge
+                            {item.month ? ` · ${item.month}` : ''}
+                            {item.source ? ` · ${item.source}` : ''}
+                            {alreadyReversed ? ' · reversed' : ''}
+                          </Text>
+                          {isOwner && !alreadyReversed ? (
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel="Reverse recharge"
+                              className="mt-sm self-start"
+                              disabled={busy}
+                              onPress={() => confirmReverseRecharge(item)}>
+                              <Text className="text-sm font-medium" style={{ color: colors.danger }}>
+                                Reverse recharge
+                              </Text>
+                            </Pressable>
+                          ) : null}
+                        </View>
+                      );
+                    }
+
+                    const item = entry.item;
+                    return (
+                      <View key={`a-${item.id}`} className="mt-sm border-b border-border py-sm">
+                        <Text className="text-base font-semibold text-ink">
+                          {formatPkr(item.amount)}
+                        </Text>
+                        <Text className="text-sm text-muted">
+                          {item.kind}
+                          {item.reason ? ` · ${item.reason}` : ''}
+                        </Text>
+                      </View>
+                    );
+                  })
                 )}
                 {isOwner && editing.status === 'active' ? (
                   <Pressable
@@ -392,6 +533,18 @@ export default function CardsScreen() {
                     className="mt-md items-center rounded-lg border border-border px-md py-md"
                     onPress={() => openRecharge(editing)}>
                     <Text className="text-base font-semibold text-ink">Add recharge</Text>
+                  </Pressable>
+                ) : null}
+                {isOwner && !hasOpening ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Set opening balance"
+                    className="mt-md items-center rounded-lg border border-border px-md py-md"
+                    onPress={() => {
+                      setOpeningOnlyText('');
+                      setOpeningOpen(true);
+                    }}>
+                    <Text className="text-base font-semibold text-ink">Set opening balance</Text>
                   </Pressable>
                 ) : null}
               </View>
@@ -472,6 +625,43 @@ export default function CardsScreen() {
               accessibilityLabel="Cancel recharge"
               className="mt-md items-center py-md"
               onPress={() => setRechargeOpen(false)}>
+              <Text className="text-base text-muted">Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={openingOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setOpeningOpen(false)}>
+        <View className="flex-1 justify-end bg-black/40">
+          <View className="rounded-t-2xl bg-background px-md pb-xl pt-lg">
+            <Text className="text-xl font-semibold text-ink">
+              Opening balance{editing ? ` · ${editing.name}` : ''}
+            </Text>
+            <Text className="mt-sm text-base text-muted">
+              Creates an OPENING adjustment. This does not edit past amounts.
+            </Text>
+            <View className="mt-lg">
+              <AmountField value={openingOnlyText} onChangeText={setOpeningOnlyText} />
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Save opening balance"
+              className="mt-lg items-center rounded-lg bg-ink px-md py-md"
+              disabled={busy}
+              onPress={() => void saveOpeningOnly()}>
+              <Text className="text-base font-semibold text-background">
+                {busy ? 'Saving…' : 'Save opening balance'}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cancel opening balance"
+              className="mt-md items-center py-md"
+              onPress={() => setOpeningOpen(false)}>
               <Text className="text-base text-muted">Cancel</Text>
             </Pressable>
           </View>

@@ -16,6 +16,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AmountField } from '@/components/AmountField';
 import { SyncBadge } from '@/components/SyncBadge';
 import { TransactionRow } from '@/components/TransactionRow';
+import {
+  listReversalLinkedIds,
+  reverseFuelTransaction,
+} from '@/features/adjustments/adjustmentService';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { listVisibleCards } from '@/features/cards/cardService';
 import {
@@ -52,6 +56,8 @@ export default function HomeScreen() {
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [myOutstanding, setMyOutstanding] = useState<number | null>(null);
+  const [reversedIds, setReversedIds] = useState<Set<string>>(new Set());
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
@@ -78,13 +84,14 @@ export default function HomeScreen() {
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const [nextCards, nextTxs, nextPeople, outstanding] = await Promise.all([
+          const [nextCards, nextTxs, nextPeople, outstanding, reversed] = await Promise.all([
             listVisibleCards(orgId, member),
             listRecentFuelTransactions(orgId, {
               userId: isOwner ? undefined : user.uid,
             }),
             isOwner ? listActiveMembers(orgId) : Promise.resolve([]),
             getPersonOutstanding(orgId, user.uid),
+            isOwner ? listReversalLinkedIds(orgId) : Promise.resolve(new Set<string>()),
           ]);
           if (cancelled) {
             return;
@@ -94,6 +101,7 @@ export default function HomeScreen() {
           setTxs(nextTxs);
           setPeople(nextPeople);
           setMyOutstanding(outstanding.outstanding);
+          setReversedIds(reversed);
           setError(null);
           setCardId((current) => current ?? activeCards[0]?.id ?? null);
           setUserId((current) => current ?? user.uid);
@@ -113,7 +121,7 @@ export default function HomeScreen() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [orgId, member, user, isOwner]);
+  }, [orgId, member, user, isOwner, reloadKey]);
 
   const stationChips = recentChips(txs.map((item) => item.station));
   const areaChips = recentChips(txs.map((item) => item.area));
@@ -129,6 +137,37 @@ export default function HomeScreen() {
       setCardId(cards[0].id);
     }
     setSheetOpen(true);
+  }
+
+  function confirmReverseFuel(item: FuelTransactionDoc) {
+    Alert.alert(
+      'Reverse fuel',
+      `Create a reversal for ${formatPkr(item.amount)} at ${item.station}? The original entry stays on the ledger.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reverse fuel',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              if (!orgId || !user) {
+                return;
+              }
+              setBusy(true);
+              setError(null);
+              try {
+                await reverseFuelTransaction(orgId, user.uid, item);
+                setReloadKey((value) => value + 1);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Reverse failed');
+              } finally {
+                setBusy(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
   }
 
   async function submitFuel() {
@@ -229,15 +268,31 @@ export default function HomeScreen() {
           ) : txs.length === 0 ? (
             <Text className="mt-md text-base text-muted">No fuel entries yet.</Text>
           ) : (
-            txs.map((item) => (
-              <TransactionRow
-                key={item.id}
-                amount={item.amount}
-                title={item.station}
-                subtitle={`${item.area}${item.syncStatus === 'PENDING' ? ' · pending sync' : ''}`}
-                syncStatus={item.syncStatus}
-              />
-            ))
+            txs.map((item) => {
+              const alreadyReversed = reversedIds.has(item.id);
+              return (
+                <View key={item.id}>
+                  <TransactionRow
+                    amount={item.amount}
+                    title={item.station}
+                    subtitle={`${item.area}${item.syncStatus === 'PENDING' ? ' · pending sync' : ''}${alreadyReversed ? ' · reversed' : ''}`}
+                    syncStatus={item.syncStatus}
+                  />
+                  {isOwner && !alreadyReversed ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Reverse fuel ${item.station}`}
+                      className="mb-sm self-start pb-md"
+                      disabled={busy}
+                      onPress={() => confirmReverseFuel(item)}>
+                      <Text className="text-sm font-medium" style={{ color: colors.danger }}>
+                        Reverse fuel
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              );
+            })
           )}
         </View>
       </ScrollView>
