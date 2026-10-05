@@ -147,6 +147,48 @@ await assertSucceeds(
 );
 await assertFails(getDoc(doc(member.firestore(), 'organizations/org1/recharges/r3')));
 
+await assertSucceeds(
+  setDoc(doc(member.firestore(), 'organizations/org1/transactions/t1'), {
+    type: 'FUEL',
+    cardId: 'card1',
+    userId: 'member1',
+    createdBy: 'member1',
+    amount: 1000,
+    station: 'PSO',
+    area: 'Gulberg',
+    syncStatus: 'PENDING',
+    requiresReview: false,
+  }),
+);
+
+await assertFails(
+  setDoc(doc(member.firestore(), 'organizations/org1/transactions/t2'), {
+    type: 'FUEL',
+    cardId: 'card2',
+    userId: 'member1',
+    createdBy: 'member1',
+    amount: 1000,
+    station: 'PSO',
+    area: 'Gulberg',
+    syncStatus: 'PENDING',
+    requiresReview: false,
+  }),
+);
+
+await assertSucceeds(
+  setDoc(doc(owner.firestore(), 'organizations/org1/transactions/t3'), {
+    type: 'FUEL',
+    cardId: 'card2',
+    userId: 'member1',
+    createdBy: 'owner1',
+    amount: 800,
+    station: 'Shell',
+    area: 'DHA',
+    syncStatus: 'PENDING',
+    requiresReview: false,
+  }),
+);
+
 const fresh = env.authenticatedContext('newbie', { email: 'new@example.com' });
 await assertSucceeds(
   setDoc(doc(fresh.firestore(), 'organizations/org2'), {
