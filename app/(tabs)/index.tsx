@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Modal,
   Pressable,
@@ -13,6 +12,10 @@ import { Link, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AmountField } from '@/components/AmountField';
+import { BalanceHero } from '@/components/BalanceHero';
+import { EmptyState } from '@/components/EmptyState';
+import { HomeSkeleton } from '@/components/HomeSkeleton';
+import { PendingBanner } from '@/components/PendingBanner';
 import { TransactionRow } from '@/components/TransactionRow';
 import {
   listReversalLinkedIds,
@@ -27,17 +30,34 @@ import {
 } from '@/features/fuel/fuelService';
 import { useOrg } from '@/features/org/OrgProvider';
 import { listActiveMembers, type OrgMemberDoc } from '@/features/org/orgService';
-import { getPersonOutstanding } from '@/features/settlements/settlementService';
+import {
+  listMyPinRequests,
+  listPendingPinRequests,
+} from '@/features/pin/pinService';
+import {
+  getPersonOutstanding,
+  listPendingSettlements,
+} from '@/features/settlements/settlementService';
 import { useSync } from '@/features/sync/SyncProvider';
 import { colors } from '@/theme/tokens';
 import type { FuelCardDoc } from '@/types/card';
 import { recentChips } from '@/utils/chips';
-import { parsePkrInput, formatPkr } from '@/utils/money';
+import {
+  balanceCaption,
+  buildMonthSnapshot,
+  buildPendingActions,
+  sumAvailableBalance,
+  type PendingAction,
+} from '@/utils/homeDashboard';
+import { parsePkrInput, formatPkr, addPkr } from '@/utils/money';
+
+const RECENT_LIMIT = 8;
+const FUEL_WINDOW = 100;
 
 export default function HomeScreen() {
   const { user } = useAuth();
   const { orgId, orgName, member } = useOrg();
-  const { status, isOnline, counts, balanceTrusted, refresh: refreshSync } = useSync();
+  const { isOnline, counts, balanceTrusted, refresh: refreshSync } = useSync();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const isOwner = member?.role === 'owner';
@@ -54,7 +74,9 @@ export default function HomeScreen() {
   const [area, setArea] = useState('');
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
-  const [myOutstanding, setMyOutstanding] = useState<number | null>(null);
+  const [outstandingTotal, setOutstandingTotal] = useState(0);
+  const [pendingPinCount, setPendingPinCount] = useState(0);
+  const [pendingSettlementCount, setPendingSettlementCount] = useState(0);
   const [reversedIds, setReversedIds] = useState<Set<string>>(new Set());
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -64,6 +86,9 @@ export default function HomeScreen() {
         setTxs([]);
         setCards([]);
         setPeople([]);
+        setOutstandingTotal(0);
+        setPendingPinCount(0);
+        setPendingSettlementCount(0);
         setLoading(false);
       }, 0);
       return () => clearTimeout(timer);
@@ -73,23 +98,49 @@ export default function HomeScreen() {
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const [nextCards, nextTxs, nextPeople, outstanding, reversed] = await Promise.all([
+          const [nextCards, nextTxs, nextPeople, pinRows, pendingSettlements] = await Promise.all([
             listVisibleCards(orgId, member),
             listRecentFuelTransactions(orgId, {
               userId: isOwner ? undefined : user.uid,
+              max: FUEL_WINDOW,
             }),
             isOwner ? listActiveMembers(orgId) : Promise.resolve([]),
-            getPersonOutstanding(orgId, user.uid),
-            isOwner ? listReversalLinkedIds(orgId) : Promise.resolve(new Set<string>()),
+            isOwner
+              ? listPendingPinRequests(orgId)
+              : listMyPinRequests(orgId, user.uid),
+            isOwner ? listPendingSettlements(orgId) : Promise.resolve([]),
           ]);
+
+          const activeCards = nextCards.filter((card) => card.status === 'active');
+          let outstanding = 0;
+          if (isOwner) {
+            const rows = await Promise.all(
+              nextPeople.map((person) => getPersonOutstanding(orgId, person.id)),
+            );
+            outstanding = rows.reduce((total, row) => addPkr(total, row.outstanding), 0);
+          } else {
+            const mine = await getPersonOutstanding(orgId, user.uid);
+            outstanding = mine.outstanding;
+          }
+
+          const reversed = isOwner
+            ? await listReversalLinkedIds(orgId)
+            : new Set<string>();
+
           if (cancelled) {
             return;
           }
-          const activeCards = nextCards.filter((card) => card.status === 'active');
+
           setCards(activeCards);
           setTxs(nextTxs);
           setPeople(nextPeople);
-          setMyOutstanding(outstanding.outstanding);
+          setOutstandingTotal(outstanding);
+          setPendingPinCount(
+            isOwner
+              ? pinRows.length
+              : pinRows.filter((item) => item.status === 'pending').length,
+          );
+          setPendingSettlementCount(pendingSettlements.length);
           setReversedIds(reversed);
           setError(null);
           setCardId((current) => current ?? activeCards[0]?.id ?? null);
@@ -112,9 +163,35 @@ export default function HomeScreen() {
     };
   }, [orgId, member, user, isOwner, reloadKey]);
 
+  const balanceSummary = useMemo(() => sumAvailableBalance(cards), [cards]);
+  const month = useMemo(
+    () =>
+      buildMonthSnapshot({
+        fuel: txs,
+        outstanding: outstandingTotal,
+      }),
+    [txs, outstandingTotal],
+  );
+  const pendingActions = useMemo(
+    () =>
+      buildPendingActions({
+        role: isOwner ? 'owner' : 'member',
+        conflictCount: counts.conflict,
+        pendingSyncCount: counts.pending,
+        pendingPinCount,
+        pendingSettlementCount,
+      }),
+    [isOwner, counts.conflict, counts.pending, pendingPinCount, pendingSettlementCount],
+  );
+  const recentTxs = useMemo(() => txs.slice(0, RECENT_LIMIT), [txs]);
   const stationChips = recentChips(txs.map((item) => item.station));
   const areaChips = recentChips(txs.map((item) => item.area));
   const selectedCard = cards.find((card) => card.id === cardId) ?? null;
+  const heroCaption = balanceCaption({
+    trusted: balanceTrusted,
+    summary: balanceSummary,
+    role: isOwner ? 'owner' : 'member',
+  });
 
   function openSheet() {
     setAmountText('');
@@ -126,6 +203,13 @@ export default function HomeScreen() {
       setCardId(cards[0].id);
     }
     setSheetOpen(true);
+  }
+
+  function onPendingPress(action: PendingAction) {
+    if (!action.href) {
+      return;
+    }
+    router.push(action.href);
   }
 
   function confirmReverseFuel(item: FuelTransactionDoc) {
@@ -185,10 +269,7 @@ export default function HomeScreen() {
           balanceBefore,
         );
         setSheetOpen(false);
-        const nextTxs = await listRecentFuelTransactions(orgId, {
-          userId: isOwner ? undefined : user.uid,
-        });
-        setTxs(nextTxs);
+        setReloadKey((value) => value + 1);
         refreshSync();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not save fuel');
@@ -212,7 +293,12 @@ export default function HomeScreen() {
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 24 }}>
         <View className="px-md pt-md">
-          <View className="flex-row items-center justify-end">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-1 pr-md">
+              <Text className="text-sm font-medium uppercase tracking-wide text-muted">
+                {orgName ?? 'Workspace'}
+              </Text>
+            </View>
             <Link href="/settings" accessibilityLabel="Open settings">
               <Text style={{ color: colors.accent }} className="text-sm font-medium">
                 Settings
@@ -220,103 +306,129 @@ export default function HomeScreen() {
             </Link>
           </View>
 
-          {isOwner && counts.conflict > 0 ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Review sync conflicts"
-              className="mt-md rounded-lg px-md py-sm"
-              style={{ backgroundColor: '#FCEBEA' }}
-              onPress={() => router.push('/conflicts')}>
-              <Text className="text-sm font-medium" style={{ color: colors.danger }}>
-                {counts.conflict} conflict{counts.conflict === 1 ? '' : 's'} need review
-              </Text>
-            </Pressable>
-          ) : null}
-
-          {counts.pending > 0 && status !== 'offline' ? (
-            <Text className="mt-md text-sm text-muted">
-              {counts.pending} pending sync{counts.pending === 1 ? '' : 's'}
-            </Text>
-          ) : null}
-
-          <Text className="mt-lg text-sm font-medium uppercase tracking-wide text-muted">
-            {orgName ?? 'Workspace'}
-          </Text>
-          <Text className="mt-sm text-sm font-medium uppercase tracking-wide text-muted">
-            Available balance
-          </Text>
-          <Text className="mt-sm text-4xl font-bold text-ink">
-            {selectedCard?.serverBalanceSnapshot != null
-              ? formatPkr(selectedCard.serverBalanceSnapshot)
-              : 'Rs —'}
-          </Text>
-          <Text className="mt-sm text-base text-muted">
-            {selectedCard
-              ? balanceTrusted
-                ? `${selectedCard.name}`
-                : `${selectedCard.name} · last known, not final`
-              : 'Add a card to start tracking balance.'}
-          </Text>
-          {myOutstanding !== null ? (
-            <Link href="/(tabs)/people" accessibilityLabel="Open people outstanding">
-              <Text className="mt-md text-base text-muted">
-                Your outstanding {formatPkr(myOutstanding)}
-              </Text>
-            </Link>
-          ) : null}
-
-          {error ? (
-            <Text className="mt-md text-sm" style={{ color: colors.danger }}>
-              {error}
-            </Text>
-          ) : null}
-
-          <Text className="mt-xl text-sm font-medium uppercase tracking-wide text-muted">
-            Recent fuel
-          </Text>
           {loading ? (
-            <ActivityIndicator className="mt-md" color={colors.accent} />
-          ) : txs.length === 0 ? (
-            <Text className="mt-md text-base text-muted">No fuel entries yet.</Text>
+            <HomeSkeleton />
+          ) : error && cards.length === 0 && txs.length === 0 ? (
+            <View className="mt-lg">
+              <EmptyState title="Could not load home" body={error} />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Retry loading home"
+                className="mt-md items-center rounded-lg border border-border px-md py-md"
+                onPress={() => {
+                  setLoading(true);
+                  setError(null);
+                  setReloadKey((value) => value + 1);
+                }}>
+                <Text className="text-base font-medium text-ink">Try again</Text>
+              </Pressable>
+            </View>
           ) : (
-            txs.map((item) => {
-              const alreadyReversed = reversedIds.has(item.id);
-              return (
-                <View key={item.id}>
-                  <TransactionRow
-                    amount={item.amount}
-                    title={item.station}
-                    subtitle={`${item.area}${item.syncStatus === 'PENDING' ? ' · pending sync' : ''}${item.requiresReview ? ' · needs review' : ''}${alreadyReversed ? ' · reversed' : ''}`}
-                    syncStatus={item.syncStatus}
-                  />
-                  {isOwner && !alreadyReversed ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Reverse fuel ${item.station}`}
-                      className="mb-sm self-start pb-md"
-                      disabled={busy}
-                      onPress={() => confirmReverseFuel(item)}>
-                      <Text className="text-sm font-medium" style={{ color: colors.danger }}>
-                        Reverse fuel
-                      </Text>
-                    </Pressable>
-                  ) : null}
+            <>
+              <View className="mt-lg">
+                <BalanceHero
+                  amount={balanceSummary.total}
+                  trusted={balanceTrusted}
+                  caption={heroCaption}
+                />
+              </View>
+
+              <View className="mt-xl flex-row" style={{ gap: 12 }}>
+                <View className="flex-1 rounded-lg border border-border bg-surface px-md py-md">
+                  <Text className="text-xs font-medium uppercase tracking-wide text-muted">
+                    This month spent
+                  </Text>
+                  <Text className="mt-sm text-lg font-semibold text-ink">
+                    {formatPkr(month.spent)}
+                  </Text>
                 </View>
-              );
-            })
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    isOwner ? 'Open people to recover outstanding' : 'Open your outstanding'
+                  }
+                  className="flex-1 rounded-lg border border-border bg-surface px-md py-md"
+                  onPress={() => router.push('/(tabs)/people')}>
+                  <Text className="text-xs font-medium uppercase tracking-wide text-muted">
+                    {isOwner ? 'To recover' : 'Your outstanding'}
+                  </Text>
+                  <Text className="mt-sm text-lg font-semibold text-ink">
+                    {formatPkr(month.outstanding)}
+                  </Text>
+                </Pressable>
+              </View>
+
+              <PendingBanner actions={pendingActions} onPressAction={onPendingPress} />
+
+              {error ? (
+                <Text className="mt-md text-sm" style={{ color: colors.danger }}>
+                  {error}
+                </Text>
+              ) : null}
+
+              {isOwner ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Go to Cards to add recharge"
+                  className="mt-lg self-start"
+                  onPress={() => router.push('/(tabs)/cards')}>
+                  <Text className="text-sm font-medium" style={{ color: colors.accent }}>
+                    Add recharge
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              <Text className="mt-xl text-sm font-medium uppercase tracking-wide text-muted">
+                Recent activity
+              </Text>
+              {recentTxs.length === 0 ? (
+                <EmptyState
+                  title="No fuel yet"
+                  body="Log your first fill with Add Fuel below."
+                />
+              ) : (
+                recentTxs.map((item) => {
+                  const alreadyReversed = reversedIds.has(item.id);
+                  return (
+                    <View key={item.id}>
+                      <TransactionRow
+                        amount={item.amount}
+                        title={item.station}
+                        subtitle={`${item.area}${item.syncStatus === 'PENDING' ? ' · pending sync' : ''}${item.requiresReview ? ' · needs review' : ''}${alreadyReversed ? ' · reversed' : ''}`}
+                        syncStatus={item.syncStatus}
+                      />
+                      {isOwner && !alreadyReversed ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Reverse fuel ${item.station}`}
+                          className="mb-sm self-start pb-md"
+                          disabled={busy}
+                          onPress={() => confirmReverseFuel(item)}>
+                          <Text className="text-sm font-medium" style={{ color: colors.danger }}>
+                            Reverse fuel
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  );
+                })
+              )}
+            </>
           )}
         </View>
       </ScrollView>
 
       <View className="border-t border-border bg-background px-md pt-md" style={{ paddingBottom: 12 }}>
-        {cards.length === 0 ? (
+        {cards.length === 0 && !loading ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Go to Cards to add a card"
             className="mb-sm"
             onPress={() => router.push('/(tabs)/cards')}>
             <Text className="text-center text-sm text-muted">
-              Add a card on the Cards tab before logging fuel.
+              {isOwner
+                ? 'Add a card on the Cards tab before logging fuel.'
+                : 'Ask the owner to assign you a card before logging fuel.'}
             </Text>
           </Pressable>
         ) : null}
@@ -326,7 +438,7 @@ export default function HomeScreen() {
           className="items-center rounded-lg bg-ink px-md py-md"
           style={{ opacity: cards.length === 0 ? 0.45 : 1 }}
           onPress={openSheet}
-          disabled={cards.length === 0}>
+          disabled={cards.length === 0 || loading}>
           <Text className="text-base font-semibold text-background">Add Fuel</Text>
         </Pressable>
       </View>
