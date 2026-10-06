@@ -17,6 +17,9 @@ import {
   getActiveMembership,
   getOrganization,
   inviteMemberByEmail,
+  listWorkspacesForEmail,
+  switchActiveOrg,
+  type WorkspaceMembership,
 } from '@/features/org/orgService';
 import type { OrgMember, UserProfile } from '@/types/org';
 import { isFirebaseConfigured } from '@/firebase/env';
@@ -34,11 +37,13 @@ type OrgContextValue = {
   orgName: string | null;
   member: OrgMember | null;
   pendingInvites: PendingInvite[];
+  workspaces: WorkspaceMembership[];
   error: string | null;
   refresh: () => Promise<void>;
   createWorkspace: (name: string) => Promise<void>;
   joinInvite: (orgId: string, inviteId: string) => Promise<void>;
   inviteEmail: (email: string) => Promise<void>;
+  switchWorkspace: (orgId: string) => Promise<void>;
 };
 
 const OrgContext = createContext<OrgContextValue | null>(null);
@@ -51,6 +56,7 @@ export function OrgProvider({ children }: PropsWithChildren) {
   const [orgName, setOrgName] = useState<string | null>(null);
   const [member, setMember] = useState<OrgMember | null>(null);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceMembership[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -60,6 +66,7 @@ export function OrgProvider({ children }: PropsWithChildren) {
       setOrgName(null);
       setMember(null);
       setPendingInvites([]);
+      setWorkspaces([]);
       setReady(true);
       return;
     }
@@ -70,6 +77,19 @@ export function OrgProvider({ children }: PropsWithChildren) {
       const nextProfile = await ensureUserProfile(user);
       setProfile(nextProfile);
 
+      const [invites, memberships] = await Promise.all([
+        findPendingInvitesForEmail(nextProfile.email),
+        listWorkspacesForEmail(nextProfile.email),
+      ]);
+      setPendingInvites(
+        invites.map((item) => ({
+          orgId: item.orgId,
+          orgName: item.orgName,
+          inviteId: item.inviteId,
+        })),
+      );
+      setWorkspaces(memberships);
+
       if (nextProfile.activeOrgId) {
         const [org, membership] = await Promise.all([
           getOrganization(nextProfile.activeOrgId),
@@ -79,23 +99,25 @@ export function OrgProvider({ children }: PropsWithChildren) {
           setOrgId(org.id);
           setOrgName(org.name);
           setMember(membership);
-          setPendingInvites([]);
           setReady(true);
           return;
         }
       }
 
+      if (memberships.length === 1) {
+        await switchActiveOrg(user, memberships[0].orgId);
+        const org = await getOrganization(memberships[0].orgId);
+        const membership = await getActiveMembership(user.uid, memberships[0].orgId);
+        setOrgId(org?.id ?? memberships[0].orgId);
+        setOrgName(org?.name ?? memberships[0].orgName);
+        setMember(membership);
+        setReady(true);
+        return;
+      }
+
       setOrgId(null);
       setOrgName(null);
       setMember(null);
-      const invites = await findPendingInvitesForEmail(nextProfile.email);
-      setPendingInvites(
-        invites.map((item) => ({
-          orgId: item.orgId,
-          orgName: item.orgName,
-          inviteId: item.inviteId,
-        })),
-      );
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not load workspace';
       setError(message);
@@ -116,6 +138,7 @@ export function OrgProvider({ children }: PropsWithChildren) {
       orgName,
       member,
       pendingInvites,
+      workspaces,
       error,
       refresh,
       createWorkspace: async (name: string) => {
@@ -140,9 +163,28 @@ export function OrgProvider({ children }: PropsWithChildren) {
           throw new Error('Only the owner can invite members');
         }
         await inviteMemberByEmail(orgId, user.uid, email);
+        await refresh();
+      },
+      switchWorkspace: async (nextOrgId: string) => {
+        if (!user) {
+          throw new Error('Not signed in');
+        }
+        await switchActiveOrg(user, nextOrgId);
+        await refresh();
       },
     }),
-    [ready, profile, orgId, orgName, member, pendingInvites, error, refresh, user],
+    [
+      ready,
+      profile,
+      orgId,
+      orgName,
+      member,
+      pendingInvites,
+      workspaces,
+      error,
+      refresh,
+      user,
+    ],
   );
 
   return <OrgContext.Provider value={value}>{children}</OrgContext.Provider>;

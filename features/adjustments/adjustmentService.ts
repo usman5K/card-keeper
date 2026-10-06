@@ -149,6 +149,22 @@ export async function listAdjustmentsForCard(orgId: string, cardId: string, max 
   }));
 }
 
+export async function listCardsWithOpening(
+  orgId: string,
+  cardIds: string[],
+): Promise<Set<string>> {
+  const ids = new Set<string>();
+  await Promise.all(
+    cardIds.map(async (cardId) => {
+      const rows = await listAdjustmentsForCard(orgId, cardId, 40);
+      if (rows.some((row) => row.kind === 'OPENING')) {
+        ids.add(cardId);
+      }
+    }),
+  );
+  return ids;
+}
+
 export async function listReversalLinkedIds(orgId: string, max = 200) {
   const snap = await getDocs(
     query(

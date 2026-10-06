@@ -20,8 +20,26 @@ describe('homeDashboard aggregates', () => {
     ).toEqual({
       total: 12500,
       knownCount: 2,
+      snapshotCount: 2,
+      projectedCount: 0,
       unknownCount: 1,
       cardCount: 3,
+    });
+  });
+
+  it('falls back to projected balances when snapshot is null', () => {
+    expect(
+      sumAvailableBalance([
+        { serverBalanceSnapshot: null, projectedBalance: 4000, status: 'active' },
+        { serverBalanceSnapshot: 1000, projectedBalance: 999, status: 'active' },
+      ]),
+    ).toEqual({
+      total: 5000,
+      knownCount: 2,
+      snapshotCount: 1,
+      projectedCount: 1,
+      unknownCount: 0,
+      cardCount: 2,
     });
   });
 
@@ -34,6 +52,8 @@ describe('homeDashboard aggregates', () => {
     ).toEqual({
       total: null,
       knownCount: 0,
+      snapshotCount: 0,
+      projectedCount: 0,
       unknownCount: 1,
       cardCount: 1,
     });
@@ -161,7 +181,14 @@ describe('homeDashboard aggregates', () => {
       balanceCaption({
         trusted: true,
         role: 'owner',
-        summary: { total: null, knownCount: 0, unknownCount: 0, cardCount: 0 },
+        summary: {
+          total: null,
+          knownCount: 0,
+          snapshotCount: 0,
+          projectedCount: 0,
+          unknownCount: 0,
+          cardCount: 0,
+        },
       }),
     ).toBe('Add a card to start tracking balance.');
 
@@ -169,15 +196,44 @@ describe('homeDashboard aggregates', () => {
       balanceCaption({
         trusted: false,
         role: 'member',
-        summary: { total: 1000, knownCount: 1, unknownCount: 0, cardCount: 1 },
+        summary: {
+          total: 1000,
+          knownCount: 1,
+          snapshotCount: 1,
+          projectedCount: 0,
+          unknownCount: 0,
+          cardCount: 1,
+        },
       }),
     ).toBe('Last known across 1 card, not final');
 
     expect(
       balanceCaption({
+        trusted: false,
+        role: 'owner',
+        summary: {
+          total: 4000,
+          knownCount: 1,
+          snapshotCount: 0,
+          projectedCount: 1,
+          unknownCount: 0,
+          cardCount: 1,
+        },
+      }),
+    ).toBe('Estimated from ledger across 1 card');
+
+    expect(
+      balanceCaption({
         trusted: true,
         role: 'owner',
-        summary: { total: 5000, knownCount: 2, unknownCount: 1, cardCount: 3 },
+        summary: {
+          total: 5000,
+          knownCount: 2,
+          snapshotCount: 2,
+          projectedCount: 0,
+          unknownCount: 1,
+          cardCount: 3,
+        },
       }),
     ).toBe('Across 2 of 3 cards with known balance');
   });

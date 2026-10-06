@@ -10,14 +10,15 @@ import {
 
 import { useAuth } from '@/features/auth/AuthProvider';
 import { useOrg } from '@/features/org/OrgProvider';
-import { colors } from '@/theme/tokens';
+import { useTheme } from '@/features/theme/ThemeProvider';
+import { toast } from '@/features/toast/ToastProvider';
 
 export default function OnboardingScreen() {
+  const { colors } = useTheme();
   const { user, loading: authLoading } = useAuth();
-  const { ready, orgId, pendingInvites, createWorkspace, joinInvite, error } = useOrg();
+  const { ready, orgId, pendingInvites, createWorkspace, joinInvite } = useOrg();
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
 
   if (authLoading || !ready) {
     return (
@@ -56,10 +57,12 @@ export default function OnboardingScreen() {
               disabled={busy}
               onPress={() => {
                 setBusy(true);
-                setLocalError(null);
                 void joinInvite(invite.orgId, invite.inviteId)
+                  .then(() => {
+                    toast.success(`Joined ${invite.orgName}.`);
+                  })
                   .catch((err: unknown) => {
-                    setLocalError(err instanceof Error ? err.message : 'Could not join');
+                    toast.error(err instanceof Error ? err.message : 'Could not join');
                   })
                   .finally(() => setBusy(false));
               }}>
@@ -88,10 +91,12 @@ export default function OnboardingScreen() {
         disabled={busy || !name.trim()}
         onPress={() => {
           setBusy(true);
-          setLocalError(null);
           void createWorkspace(name)
+            .then(() => {
+              toast.success('Workspace created.');
+            })
             .catch((err: unknown) => {
-              setLocalError(err instanceof Error ? err.message : 'Could not create workspace');
+              toast.error(err instanceof Error ? err.message : 'Could not create workspace');
             })
             .finally(() => setBusy(false));
         }}>
@@ -99,12 +104,6 @@ export default function OnboardingScreen() {
           {busy ? 'Working…' : 'Create workspace'}
         </Text>
       </Pressable>
-
-      {localError || error ? (
-        <Text className="mt-md text-sm" style={{ color: colors.danger }}>
-          {localError ?? error}
-        </Text>
-      ) : null}
     </View>
   );
 }

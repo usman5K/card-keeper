@@ -1,6 +1,7 @@
 import { Text, View } from 'react-native';
 
-import { a11y, colors } from '@/theme/tokens';
+import { useTheme } from '@/features/theme/ThemeProvider';
+import { a11y } from '@/theme/tokens';
 
 type Props = {
   visible: boolean;
@@ -11,6 +12,8 @@ export function OfflineBanner({
   visible,
   message = 'You are offline. Balances are last known, not final.',
 }: Props) {
+  const { colors, resolved } = useTheme();
+
   if (!visible) {
     return null;
   }
@@ -19,7 +22,10 @@ export function OfflineBanner({
     <View
       accessibilityRole="alert"
       className="justify-center px-md"
-      style={{ backgroundColor: '#F5E6C8', minHeight: a11y.minHit }}>
+      style={{
+        backgroundColor: resolved === 'dark' ? '#3A2E14' : '#F5E6C8',
+        minHeight: a11y.minHit,
+      }}>
       <Text className="text-sm font-medium" style={{ color: colors.offline }}>
         {message}
       </Text>

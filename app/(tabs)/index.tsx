@@ -1,27 +1,31 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Modal,
   Pressable,
   ScrollView,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { Link, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 
 import { AmountField } from '@/components/AmountField';
+import { AppButton } from '@/components/AppButton';
 import { BalanceHero } from '@/components/BalanceHero';
+import { BottomSheet } from '@/components/BottomSheet';
+import { ChipRow } from '@/components/ChipRow';
 import { ConfirmSheet } from '@/components/ConfirmSheet';
 import { EmptyState } from '@/components/EmptyState';
 import { HomeSkeleton } from '@/components/HomeSkeleton';
 import { PendingBanner } from '@/components/PendingBanner';
+import { SelectField } from '@/components/SelectField';
+import { SheetActions } from '@/components/SheetActions';
 import { TransactionRow } from '@/components/TransactionRow';
 import {
   listReversalLinkedIds,
   reverseFuelTransaction,
 } from '@/features/adjustments/adjustmentService';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { projectBalancesForCards } from '@/features/balance/balanceService';
 import { listVisibleCards } from '@/features/cards/cardService';
 import {
   createFuelTransaction,
@@ -39,7 +43,9 @@ import {
   listPendingSettlements,
 } from '@/features/settlements/settlementService';
 import { useSync } from '@/features/sync/SyncProvider';
-import { a11y, colors } from '@/theme/tokens';
+import { useTheme } from '@/features/theme/ThemeProvider';
+import { toast } from '@/features/toast/ToastProvider';
+import { a11y } from '@/theme/tokens';
 import type { FuelCardDoc } from '@/types/card';
 import { recentChips } from '@/utils/chips';
 import {
@@ -66,11 +72,12 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const { orgId, orgName, member } = useOrg();
   const { isOnline, counts, balanceTrusted, refresh: refreshSync } = useSync();
+  const { colors } = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const isOwner = member?.role === 'owner';
   const [txs, setTxs] = useState<FuelTransactionDoc[]>([]);
   const [cards, setCards] = useState<FuelCardDoc[]>([]);
+  const [projectedByCard, setProjectedByCard] = useState<Record<string, number>>({});
   const [people, setPeople] = useState<OrgMemberDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,6 +101,7 @@ export default function HomeScreen() {
       const timer = setTimeout(() => {
         setTxs([]);
         setCards([]);
+        setProjectedByCard({});
         setPeople([]);
         setOutstandingTotal(0);
         setPendingPinCount(0);
@@ -121,26 +129,29 @@ export default function HomeScreen() {
           ]);
 
           const activeCards = nextCards.filter((card) => card.status === 'active');
-          let outstanding = 0;
-          if (isOwner) {
-            const rows = await Promise.all(
-              nextPeople.map((person) => getPersonOutstanding(orgId, person.id)),
-            );
-            outstanding = rows.reduce((total, row) => addPkr(total, row.outstanding), 0);
-          } else {
-            const mine = await getPersonOutstanding(orgId, user.uid);
-            outstanding = mine.outstanding;
-          }
-
-          const reversed = isOwner
-            ? await listReversalLinkedIds(orgId)
-            : new Set<string>();
+          const needsProjection = activeCards
+            .filter((card) => card.serverBalanceSnapshot == null)
+            .map((card) => card.id);
+          const [outstandingRows, reversed, projected] = await Promise.all([
+            isOwner
+              ? Promise.all(nextPeople.map((person) => getPersonOutstanding(orgId, person.id)))
+              : getPersonOutstanding(orgId, user.uid).then((mine) => [mine]),
+            isOwner ? listReversalLinkedIds(orgId) : Promise.resolve(new Set<string>()),
+            needsProjection.length > 0
+              ? projectBalancesForCards(orgId, needsProjection)
+              : Promise.resolve({} as Record<string, number>),
+          ]);
+          const outstanding = outstandingRows.reduce(
+            (total, row) => addPkr(total, row.outstanding),
+            0,
+          );
 
           if (cancelled) {
             return;
           }
 
           setCards(activeCards);
+          setProjectedByCard(projected);
           setTxs(nextTxs);
           setPeople(nextPeople);
           setOutstandingTotal(outstanding);
@@ -172,7 +183,21 @@ export default function HomeScreen() {
     };
   }, [orgId, member, user, isOwner, reloadKey]);
 
-  const balanceSummary = useMemo(() => sumAvailableBalance(cards), [cards]);
+  const balanceSummary = useMemo(
+    () =>
+      sumAvailableBalance(
+        cards.map((card) => ({
+          serverBalanceSnapshot: card.serverBalanceSnapshot,
+          projectedBalance: projectedByCard[card.id] ?? null,
+          status: card.status,
+        })),
+      ),
+    [cards, projectedByCard],
+  );
+  const balanceIsTrusted =
+    balanceTrusted &&
+    balanceSummary.projectedCount === 0 &&
+    balanceSummary.unknownCount === 0;
   const month = useMemo(
     () =>
       buildMonthSnapshot({
@@ -197,7 +222,7 @@ export default function HomeScreen() {
   const areaChips = recentChips(txs.map((item) => item.area));
   const selectedCard = cards.find((card) => card.id === cardId) ?? null;
   const heroCaption = balanceCaption({
-    trusted: balanceTrusted,
+    trusted: balanceIsTrusted,
     summary: balanceSummary,
     role: isOwner ? 'owner' : 'member',
   });
@@ -232,13 +257,13 @@ export default function HomeScreen() {
           return;
         }
         setBusy(true);
-        setError(null);
         try {
           await reverseFuelTransaction(orgId, user.uid, item);
+          toast.success('Fuel reversed.');
           setReloadKey((value) => value + 1);
           refreshSync();
         } catch (err) {
-          setError(err instanceof Error ? err.message : 'Reverse failed');
+          toast.error(err instanceof Error ? err.message : 'Reverse failed');
         } finally {
           setBusy(false);
         }
@@ -253,7 +278,6 @@ export default function HomeScreen() {
 
     const runCreate = async () => {
       setBusy(true);
-      setError(null);
       try {
         const amount = parsePkrInput(amountText);
         const balanceBefore = selectedCard?.serverBalanceSnapshot ?? null;
@@ -271,10 +295,11 @@ export default function HomeScreen() {
           balanceBefore,
         );
         setSheetOpen(false);
+        toast.success(isOnline ? 'Fuel saved.' : 'Fuel saved offline.');
         setReloadKey((value) => value + 1);
         refreshSync();
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not save fuel');
+        toast.error(err instanceof Error ? err.message : 'Could not save fuel');
       } finally {
         setBusy(false);
       }
@@ -294,62 +319,44 @@ export default function HomeScreen() {
   }
 
   return (
-    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 24 }}>
+    <View className="flex-1 bg-background">
+      <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 32 }}>
         <View className="px-md pt-md">
-          <View className="flex-row items-center justify-between">
-            <View className="flex-1 pr-md">
-              <Text className="text-sm font-medium uppercase tracking-wide text-muted">
-                {orgName ?? 'Workspace'}
-              </Text>
-            </View>
-            <Link href="/settings" asChild>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Open settings"
-                className="items-center justify-center px-sm"
-                style={({ pressed }) => ({
-                  minHeight: a11y.minHit,
-                  minWidth: a11y.minHit,
-                  opacity: pressed ? 0.7 : 1,
-                  justifyContent: 'center',
-                })}>
-                <Text style={{ color: colors.accent }} className="text-sm font-medium">
-                  Settings
-                </Text>
-              </Pressable>
-            </Link>
-          </View>
+          <Text className="text-sm font-medium uppercase tracking-wide text-muted">
+            {orgName ?? 'Workspace'}
+          </Text>
 
           {loading ? (
-            <HomeSkeleton />
+            <View className="mt-md">
+              <HomeSkeleton />
+            </View>
           ) : error && cards.length === 0 && txs.length === 0 ? (
             <View className="mt-lg">
               <EmptyState title="Could not load home" body={error} />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Retry loading home"
-                className="mt-md items-center rounded-lg border border-border px-md py-md"
-                onPress={() => {
-                  setLoading(true);
-                  setError(null);
-                  setReloadKey((value) => value + 1);
-                }}>
-                <Text className="text-base font-medium text-ink">Try again</Text>
-              </Pressable>
+              <View className="mt-md">
+                <AppButton
+                  label="Try again"
+                  variant="secondary"
+                  onPress={() => {
+                    setLoading(true);
+                    setError(null);
+                    setReloadKey((value) => value + 1);
+                  }}
+                />
+              </View>
             </View>
           ) : (
             <>
-              <View className="mt-lg">
+              <View className="mt-md">
                 <BalanceHero
                   amount={balanceSummary.total}
-                  trusted={balanceTrusted}
+                  trusted={balanceIsTrusted}
                   caption={heroCaption}
                 />
               </View>
 
-              <View className="mt-xl flex-row" style={{ gap: 12 }}>
-                <View className="flex-1 rounded-lg border border-border bg-surface px-md py-md">
+              <View className="mt-lg flex-row" style={{ gap: 12 }}>
+                <View className="flex-1 rounded-2xl border border-border bg-surface px-md py-md">
                   <Text className="text-xs font-medium uppercase tracking-wide text-muted">
                     This month spent
                   </Text>
@@ -362,7 +369,7 @@ export default function HomeScreen() {
                   accessibilityLabel={
                     isOwner ? 'Open people to recover outstanding' : 'Open your outstanding'
                   }
-                  className="flex-1 rounded-lg border border-border bg-surface px-md py-md"
+                  className="flex-1 rounded-2xl border border-border bg-surface px-md py-md"
                   onPress={() => router.push('/(tabs)/people')}>
                   <Text className="text-xs font-medium uppercase tracking-wide text-muted">
                     {isOwner ? 'To recover' : 'Your outstanding'}
@@ -374,12 +381,6 @@ export default function HomeScreen() {
               </View>
 
               <PendingBanner actions={pendingActions} onPressAction={onPendingPress} />
-
-              {error ? (
-                <Text className="mt-md text-sm" style={{ color: colors.danger }}>
-                  {error}
-                </Text>
-              ) : null}
 
               {isOwner ? (
                 <Pressable
@@ -434,7 +435,15 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
-      <View className="border-t border-border bg-background px-md pt-md" style={{ paddingBottom: 12 }}>
+      <View
+        style={{
+          borderTopWidth: 1,
+          borderTopColor: colors.border,
+          backgroundColor: colors.surface,
+          paddingHorizontal: 16,
+          paddingTop: 12,
+          paddingBottom: 12,
+        }}>
         {cards.length === 0 && !loading ? (
           <Pressable
             accessibilityRole="button"
@@ -448,19 +457,11 @@ export default function HomeScreen() {
             </Text>
           </Pressable>
         ) : null}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Add Fuel"
-          className="items-center rounded-lg bg-ink px-md"
-          style={({ pressed }) => ({
-            minHeight: a11y.minHit,
-            justifyContent: 'center',
-            opacity: cards.length === 0 ? 0.45 : pressed ? 0.88 : 1,
-          })}
+        <AppButton
+          label="Add Fuel"
           onPress={openSheet}
-          disabled={cards.length === 0 || loading}>
-          <Text className="text-base font-semibold text-background">Add Fuel</Text>
-        </Pressable>
+          disabled={cards.length === 0 || loading}
+        />
       </View>
 
       <ConfirmSheet
@@ -487,142 +488,127 @@ export default function HomeScreen() {
         }}
       />
 
-      <Modal visible={sheetOpen} animationType="slide" transparent onRequestClose={() => setSheetOpen(false)}>
-        <View className="flex-1 justify-end bg-black/40">
-          <ScrollView
-            className="max-h-[92%] rounded-t-2xl bg-background"
-            contentContainerStyle={{ padding: 16, paddingBottom: 40 + insets.bottom }}>
-            <Text className="text-xl font-semibold text-ink">Add Fuel</Text>
-            <View className="mt-lg">
-              <AmountField value={amountText} onChangeText={setAmountText} />
-            </View>
-
-            <Text className="mt-lg text-sm font-medium uppercase tracking-wide text-muted">Card</Text>
-            <View className="mt-sm flex-row flex-wrap" style={{ gap: 8 }}>
-              {cards.map((card) => {
-                const selected = card.id === cardId;
-                return (
-                  <Pressable
-                    key={card.id}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    className="rounded-lg border px-md py-sm"
-                    style={{
-                      borderColor: selected ? colors.accent : colors.border,
-                      backgroundColor: selected ? colors.accentSoft : colors.surface,
-                    }}
-                    onPress={() => setCardId(card.id)}>
-                    <Text style={{ color: selected ? colors.accent : colors.ink }}>
-                      {card.name} · {card.last4}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            {isOwner ? (
-              <>
-                <Text className="mt-lg text-sm font-medium uppercase tracking-wide text-muted">
-                  Used by
-                </Text>
-                <View className="mt-sm flex-row flex-wrap" style={{ gap: 8 }}>
-                  {people.map((person) => {
-                    const selected = person.id === userId;
-                    return (
-                      <Pressable
-                        key={person.id}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected }}
-                        className="rounded-lg border px-md py-sm"
-                        style={{
-                          borderColor: selected ? colors.accent : colors.border,
-                          backgroundColor: selected ? colors.accentSoft : colors.surface,
-                        }}
-                        onPress={() => setUserId(person.id)}>
-                        <Text style={{ color: selected ? colors.accent : colors.ink }}>
-                          {person.displayName || person.email}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </>
-            ) : null}
-
-            <Text className="mt-lg text-sm font-medium uppercase tracking-wide text-muted">
-              Station
-            </Text>
-            {stationChips.length > 0 ? (
-              <View className="mt-sm flex-row flex-wrap" style={{ gap: 8 }}>
-                {stationChips.map((chip) => (
-                  <Pressable
-                    key={chip}
-                    accessibilityRole="button"
-                    className="rounded-lg border border-border px-md py-sm"
-                    onPress={() => setStation(chip)}>
-                    <Text className="text-sm text-ink">{chip}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            ) : null}
-            <TextInput
-              value={station}
-              onChangeText={setStation}
-              placeholder="Station"
-              placeholderTextColor={colors.muted}
-              className="mt-sm rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
-            />
-
-            <Text className="mt-lg text-sm font-medium uppercase tracking-wide text-muted">Area</Text>
-            {areaChips.length > 0 ? (
-              <View className="mt-sm flex-row flex-wrap" style={{ gap: 8 }}>
-                {areaChips.map((chip) => (
-                  <Pressable
-                    key={chip}
-                    accessibilityRole="button"
-                    className="rounded-lg border border-border px-md py-sm"
-                    onPress={() => setArea(chip)}>
-                    <Text className="text-sm text-ink">{chip}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            ) : null}
-            <TextInput
-              value={area}
-              onChangeText={setArea}
-              placeholder="Area"
-              placeholderTextColor={colors.muted}
-              className="mt-sm rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
-            />
-
-            <TextInput
-              value={notes}
-              onChangeText={setNotes}
-              placeholder="Notes (optional)"
-              placeholderTextColor={colors.muted}
-              className="mt-md rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
-            />
-
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Save fuel entry"
-              className="mt-xl items-center rounded-lg bg-ink px-md py-md"
+      <BottomSheet
+        visible={sheetOpen}
+        title="Add Fuel"
+        onClose={() => setSheetOpen(false)}
+        footer={
+          <SheetActions>
+            <AppButton
+              label="Cancel"
+              variant="secondary"
               disabled={busy}
-              onPress={() => void submitFuel()}>
-              <Text className="text-base font-semibold text-background">
-                {busy ? 'Saving…' : isOnline ? 'Save fuel' : 'Save offline'}
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Cancel add fuel"
-              className="mt-md items-center py-md"
-              onPress={() => setSheetOpen(false)}>
-              <Text className="text-base text-muted">Cancel</Text>
-            </Pressable>
-          </ScrollView>
+              onPress={() => setSheetOpen(false)}
+            />
+            <AppButton
+              label={busy ? 'Saving…' : isOnline ? 'Save' : 'Save offline'}
+              busy={busy}
+              onPress={() => void submitFuel()}
+            />
+          </SheetActions>
+        }>
+        <AmountField value={amountText} onChangeText={setAmountText} />
+
+        <View className="mt-lg">
+          <SelectField
+            label="Card"
+            value={cardId}
+            options={cards.map((card) => ({
+              value: card.id,
+              label: card.name,
+              detail: `•••• ${card.last4}${card.issuer ? ` · ${card.issuer}` : ''}`,
+            }))}
+            placeholder="Choose card"
+            onChange={setCardId}
+          />
         </View>
-      </Modal>
+
+        {isOwner ? (
+          <View className="mt-lg">
+            <SelectField
+              label="Used by"
+              value={userId}
+              options={people.map((person) => ({
+                value: person.id,
+                label: person.displayName || person.email,
+                detail: person.email,
+              }))}
+              placeholder="Choose person"
+              onChange={setUserId}
+            />
+          </View>
+        ) : null}
+
+        <View className="mt-lg">
+          <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600' }}>STATION</Text>
+          {stationChips.length > 0 ? (
+            <View style={{ marginTop: 8 }}>
+              <ChipRow options={stationChips} selected={station} onSelect={setStation} />
+            </View>
+          ) : null}
+          <TextInput
+            value={station}
+            onChangeText={setStation}
+            placeholder={stationChips.length ? 'Or type a station' : 'Station name'}
+            placeholderTextColor={colors.muted}
+            style={{
+              marginTop: 8,
+              borderWidth: 1,
+              borderColor: colors.border,
+              backgroundColor: colors.surface,
+              color: colors.ink,
+              borderRadius: 12,
+              paddingHorizontal: 16,
+              paddingVertical: 14,
+              fontSize: 16,
+            }}
+          />
+        </View>
+
+        <View className="mt-lg">
+          <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600' }}>AREA</Text>
+          {areaChips.length > 0 ? (
+            <View style={{ marginTop: 8 }}>
+              <ChipRow options={areaChips} selected={area} onSelect={setArea} />
+            </View>
+          ) : null}
+          <TextInput
+            value={area}
+            onChangeText={setArea}
+            placeholder={areaChips.length ? 'Or type an area' : 'Area'}
+            placeholderTextColor={colors.muted}
+            style={{
+              marginTop: 8,
+              borderWidth: 1,
+              borderColor: colors.border,
+              backgroundColor: colors.surface,
+              color: colors.ink,
+              borderRadius: 12,
+              paddingHorizontal: 16,
+              paddingVertical: 14,
+              fontSize: 16,
+            }}
+          />
+        </View>
+
+        <TextInput
+          value={notes}
+          onChangeText={setNotes}
+          placeholder="Notes (optional)"
+          placeholderTextColor={colors.muted}
+          style={{
+            marginTop: 16,
+            borderWidth: 1,
+            borderColor: colors.border,
+            backgroundColor: colors.surface,
+            color: colors.ink,
+            borderRadius: 12,
+            paddingHorizontal: 16,
+            paddingVertical: 14,
+            fontSize: 16,
+          }}
+        />
+      </BottomSheet>
     </View>
   );
 }

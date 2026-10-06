@@ -1,6 +1,6 @@
 import { Text, View } from 'react-native';
 
-import { colors } from '@/theme/tokens';
+import { useTheme } from '@/features/theme/ThemeProvider';
 import { formatPkr } from '@/utils/money';
 
 type Props = {
@@ -18,8 +18,10 @@ export function BalanceHero({
   caption,
   loading = false,
 }: Props) {
+  const { colors } = useTheme();
+
   return (
-    <View>
+    <View className="rounded-2xl border border-border bg-surface px-md py-lg">
       <Text className="text-sm font-medium uppercase tracking-wide text-muted">{label}</Text>
       {loading ? (
         <View
@@ -32,7 +34,7 @@ export function BalanceHero({
           accessibilityLabel={
             amount == null
               ? 'Available balance unknown'
-              : `Available balance ${formatPkr(amount)}${trusted ? '' : ', last known'}`
+              : `Available balance ${formatPkr(amount)}${trusted ? '' : ', estimated'}`
           }>
           {amount == null ? 'Rs —' : formatPkr(amount)}
         </Text>
@@ -40,7 +42,7 @@ export function BalanceHero({
       {caption ? <Text className="mt-sm text-base text-muted">{caption}</Text> : null}
       {!trusted && amount != null && !loading ? (
         <Text className="mt-xs text-sm" style={{ color: colors.offline }}>
-          Last known, not final
+          Not final until server sync
         </Text>
       ) : null}
     </View>

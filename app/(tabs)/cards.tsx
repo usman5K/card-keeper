@@ -2,31 +2,36 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Modal,
   Pressable,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
 import { AmountField } from '@/components/AmountField';
+import { AppButton } from '@/components/AppButton';
+import { BottomSheet } from '@/components/BottomSheet';
+import { CardListItem } from '@/components/CardListItem';
 import { CardsSkeleton } from '@/components/CardsSkeleton';
 import { ConfirmSheet } from '@/components/ConfirmSheet';
 import { EmptyState } from '@/components/EmptyState';
+import { SheetActions } from '@/components/SheetActions';
 import {
   createOpeningBalance,
   listAdjustmentsForCard,
+  listCardsWithOpening,
   reverseRecharge,
   type AdjustmentDoc,
 } from '@/features/adjustments/adjustmentService';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { projectBalancesForCards } from '@/features/balance/balanceService';
 import {
   createCard,
   listVisibleCards,
   updateCard,
 } from '@/features/cards/cardService';
 import { useOrg } from '@/features/org/OrgProvider';
+import { useTheme } from '@/features/theme/ThemeProvider';
+import { toast } from '@/features/toast/ToastProvider';
 import {
   getCardPin,
   getPinRequestForCard,
@@ -44,7 +49,7 @@ import {
   listRechargesForCard,
   type RechargeDoc,
 } from '@/features/recharges/rechargeService';
-import { a11y, colors } from '@/theme/tokens';
+import { a11y } from '@/theme/tokens';
 import type { FuelCardDoc } from '@/types/card';
 import { formatPkr, parsePkrInput } from '@/utils/money';
 
@@ -63,9 +68,11 @@ type PendingConfirm = {
 export default function CardsScreen() {
   const { user } = useAuth();
   const { ready: orgReady, orgId, member, refresh } = useOrg();
-  const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const isOwner = member?.role === 'owner';
   const [cards, setCards] = useState<FuelCardDoc[]>([]);
+  const [balances, setBalances] = useState<Record<string, number>>({});
+  const [openingCardIds, setOpeningCardIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -81,11 +88,13 @@ export default function CardsScreen() {
   const [amountText, setAmountText] = useState('');
   const [source, setSource] = useState('');
   const [notes, setNotes] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyCard, setHistoryCard] = useState<FuelCardDoc | null>(null);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [reversedIds, setReversedIds] = useState<Set<string>>(new Set());
-  const [hasOpening, setHasOpening] = useState(false);
   const [openingOpen, setOpeningOpen] = useState(false);
+  const [openingCard, setOpeningCard] = useState<FuelCardDoc | null>(null);
   const [openingOnlyText, setOpeningOnlyText] = useState('');
   const [pinText, setPinText] = useState('');
   const [pendingPins, setPendingPins] = useState<PinRequestDoc[]>([]);
@@ -108,6 +117,8 @@ export default function CardsScreen() {
     if (!orgId || !member) {
       const timer = setTimeout(() => {
         setCards([]);
+        setBalances({});
+        setOpeningCardIds(new Set());
         setLoading(false);
       }, 0);
       return () => clearTimeout(timer);
@@ -123,12 +134,42 @@ export default function CardsScreen() {
             return;
           }
           next.sort((a, b) => a.name.localeCompare(b.name));
+          const needsProjection = next
+            .filter((card) => card.serverBalanceSnapshot == null)
+            .map((card) => card.id);
+          const [projected, pinRows, openingIds] = await Promise.all([
+            needsProjection.length > 0
+              ? projectBalancesForCards(orgId, needsProjection)
+              : Promise.resolve({} as Record<string, number>),
+            member.role === 'owner'
+              ? listPendingPinRequests(orgId)
+              : user
+                ? listMyPinRequests(orgId, user.uid)
+                : Promise.resolve([] as PinRequestDoc[]),
+            listCardsWithOpening(
+              orgId,
+              next.map((card) => card.id),
+            ),
+          ]);
+          if (cancelled) {
+            return;
+          }
+          const nextBalances: Record<string, number> = {};
+          for (const card of next) {
+            if (card.serverBalanceSnapshot != null) {
+              nextBalances[card.id] = card.serverBalanceSnapshot;
+            } else if (projected[card.id] != null) {
+              nextBalances[card.id] = projected[card.id];
+            }
+          }
           setCards(next);
+          setBalances(nextBalances);
+          setOpeningCardIds(openingIds);
           if (member.role === 'owner') {
-            setPendingPins(await listPendingPinRequests(orgId));
+            setPendingPins(pinRows);
             setMyPins([]);
-          } else if (user) {
-            setMyPins(await listMyPinRequests(orgId, user.uid));
+          } else {
+            setMyPins(pinRows);
             setPendingPins([]);
           }
           setError(null);
@@ -164,12 +205,12 @@ export default function CardsScreen() {
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       await requestCardPin(orgId, user.uid, { cardId: card.id });
+      toast.success('PIN request sent.');
       reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'PIN request failed');
+      toast.error(err instanceof Error ? err.message : 'PIN request failed');
     } finally {
       setBusy(false);
     }
@@ -180,7 +221,6 @@ export default function CardsScreen() {
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       if (!isOwner) {
         const req = await getPinRequestForCard(orgId, card.id, user.uid);
@@ -196,7 +236,7 @@ export default function CardsScreen() {
       setRevealPin(value);
       setRevealOpen(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not open PIN');
+      toast.error(err instanceof Error ? err.message : 'Could not open PIN');
     } finally {
       setBusy(false);
     }
@@ -207,14 +247,14 @@ export default function CardsScreen() {
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       await resolvePinRequest(orgId, resolveTarget.id, user.uid, { status });
       setResolveOpen(false);
       setResolveTarget(null);
+      toast.success(status === 'approved' ? 'PIN request approved.' : 'PIN request rejected.');
       reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not resolve PIN request');
+      toast.error(err instanceof Error ? err.message : 'Could not resolve PIN request');
     } finally {
       setBusy(false);
     }
@@ -225,14 +265,14 @@ export default function CardsScreen() {
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       await sharePinAccess(orgId, resolveTarget.id, user.uid);
       setResolveOpen(false);
       setResolveTarget(null);
+      toast.success('PIN shared.');
       reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not share PIN access');
+      toast.error(err instanceof Error ? err.message : 'Could not share PIN access');
     } finally {
       setBusy(false);
     }
@@ -254,7 +294,9 @@ export default function CardsScreen() {
           .map((item) => item.linkedTxId as string),
       );
       setReversedIds(linked);
-      setHasOpening(adjustments.some((item) => item.kind === 'OPENING'));
+      if (adjustments.some((item) => item.kind === 'OPENING')) {
+        setOpeningCardIds((current) => new Set(current).add(card.id));
+      }
       const merged: TimelineItem[] = [
         ...recharges.map((item) => ({
           kind: 'recharge' as const,
@@ -270,10 +312,9 @@ export default function CardsScreen() {
       merged.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
       setTimeline(merged);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load card activity');
+      toast.error(err instanceof Error ? err.message : 'Could not load card activity');
       setTimeline([]);
       setReversedIds(new Set());
-      setHasOpening(false);
     } finally {
       setTimelineLoading(false);
     }
@@ -286,9 +327,6 @@ export default function CardsScreen() {
     setIssuer('');
     setOpeningText('');
     setPinText('');
-    setTimeline([]);
-    setReversedIds(new Set());
-    setHasOpening(false);
     setFormOpen(true);
   }
 
@@ -299,7 +337,19 @@ export default function CardsScreen() {
     setIssuer(card.issuer);
     setPinText('');
     setFormOpen(true);
+  }
+
+  function openHistory(card: FuelCardDoc) {
+    setHistoryCard(card);
+    setTimeline([]);
+    setHistoryOpen(true);
     void loadTimeline(card);
+  }
+
+  function openOpening(card: FuelCardDoc) {
+    setOpeningCard(card);
+    setOpeningOnlyText('');
+    setOpeningOpen(true);
   }
 
   function openRecharge(card: FuelCardDoc) {
@@ -315,7 +365,6 @@ export default function CardsScreen() {
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       if (editing) {
         await updateCard(orgId, user.uid, editing.id, { name, last4, issuer });
@@ -323,6 +372,7 @@ export default function CardsScreen() {
         if (pinRaw) {
           await setCardPin(orgId, user.uid, editing.id, pinRaw);
         }
+        toast.success('Card updated.');
       } else {
         const card = await createCard(orgId, user.uid, { name, last4, issuer });
         const openingRaw = openingText.trim();
@@ -336,12 +386,13 @@ export default function CardsScreen() {
         if (pinRaw) {
           await setCardPin(orgId, user.uid, card.id, pinRaw);
         }
+        toast.success('Card created.');
       }
       setFormOpen(false);
       reload();
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed');
+      toast.error(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setBusy(false);
     }
@@ -354,16 +405,16 @@ export default function CardsScreen() {
       confirmLabel: 'Reverse recharge',
       destructive: true,
       run: async () => {
-        if (!orgId || !user || !editing) {
+        if (!orgId || !user || !historyCard) {
           return;
         }
         setBusy(true);
-        setError(null);
         try {
           await reverseRecharge(orgId, user.uid, item);
-          await loadTimeline(editing);
+          toast.success('Recharge reversed.');
+          await loadTimeline(historyCard);
         } catch (err) {
-          setError(err instanceof Error ? err.message : 'Reverse failed');
+          toast.error(err instanceof Error ? err.message : 'Reverse failed');
         } finally {
           setBusy(false);
         }
@@ -372,19 +423,21 @@ export default function CardsScreen() {
   }
 
   async function saveOpeningOnly() {
-    if (!orgId || !user || !editing) {
+    if (!orgId || !user || !openingCard) {
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       const amount = parsePkrInput(openingOnlyText);
-      await createOpeningBalance(orgId, user.uid, editing.id, amount);
+      await createOpeningBalance(orgId, user.uid, openingCard.id, amount);
       setOpeningOpen(false);
       setOpeningOnlyText('');
-      await loadTimeline(editing);
+      setOpeningCardIds((current) => new Set(current).add(openingCard.id));
+      setOpeningCard(null);
+      toast.success('Opening balance set.');
+      reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Opening balance failed');
+      toast.error(err instanceof Error ? err.message : 'Opening balance failed');
     } finally {
       setBusy(false);
     }
@@ -395,7 +448,6 @@ export default function CardsScreen() {
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       const amount = parsePkrInput(amountText);
       await createRecharge(orgId, user.uid, {
@@ -405,11 +457,13 @@ export default function CardsScreen() {
         notes: notes.trim() || undefined,
       });
       setRechargeOpen(false);
+      toast.success('Recharge recorded.');
       if (editing?.id === rechargeCard.id) {
         await loadTimeline(rechargeCard);
       }
+      reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Recharge failed');
+      toast.error(err instanceof Error ? err.message : 'Recharge failed');
     } finally {
       setBusy(false);
     }
@@ -429,9 +483,10 @@ export default function CardsScreen() {
         try {
           await updateCard(orgId, user.uid, card.id, { status: 'inactive' });
           setFormOpen(false);
+          toast.success('Card deactivated.');
           reload();
         } catch (err) {
-          setError(err instanceof Error ? err.message : 'Update failed');
+          toast.error(err instanceof Error ? err.message : 'Update failed');
         } finally {
           setBusy(false);
         }
@@ -447,47 +502,29 @@ export default function CardsScreen() {
     try {
       await updateCard(orgId, user.uid, card.id, { status: 'active' });
       setFormOpen(false);
+      toast.success('Card reactivated.');
       reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Update failed');
+      toast.error(err instanceof Error ? err.message : 'Update failed');
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <View className="flex-row items-end justify-between px-md pt-md">
-        <View className="flex-1 pr-md">
-          <Text className="text-sm font-medium uppercase tracking-wide text-muted">
-            Fuel cards
-          </Text>
-          <Text className="mt-sm text-base text-muted">
-            {isOwner
-              ? 'Create cards, add recharges, assign on People.'
-              : 'Cards assigned to you. Request PIN when needed.'}
-          </Text>
-        </View>
+    <View className="flex-1 bg-background">
+      <View className="px-md pt-md">
+        <Text className="text-base text-muted">
+          {isOwner
+            ? 'Balances, recharges, and PIN access for each fuel card.'
+            : 'Cards assigned to you. Request PIN when you need it.'}
+        </Text>
         {isOwner ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Add card"
-            className="items-center justify-center rounded-lg bg-ink px-md"
-            style={({ pressed }) => ({
-              minHeight: a11y.minHit,
-              opacity: pressed ? 0.88 : 1,
-            })}
-            onPress={openCreate}>
-            <Text className="text-sm font-semibold text-background">Add card</Text>
-          </Pressable>
+          <View className="mt-md">
+            <AppButton label="Add card" onPress={openCreate} />
+          </View>
         ) : null}
       </View>
-
-      {error && cards.length > 0 ? (
-        <Text className="px-md pt-md text-sm" style={{ color: colors.danger }}>
-          {error}
-        </Text>
-      ) : null}
 
       {isOwner && pendingPins.length > 0 ? (
         <View className="px-md pt-md">
@@ -553,87 +590,71 @@ export default function CardsScreen() {
               }
             />
           }
-          renderItem={({ item }) => (
-            <View className="mb-md rounded-lg border border-border bg-surface px-md py-md">
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${item.name} ending ${item.last4}`}
-                style={{ minHeight: a11y.minHit, justifyContent: 'center' }}
-                onPress={() => openEdit(item)}>
-                <View className="flex-row items-center justify-between">
-                  <Text className="text-lg font-semibold text-ink">{item.name}</Text>
-                  <Text
-                    className="text-xs font-medium uppercase"
-                    style={{
-                      color: item.status === 'active' ? colors.online : colors.offline,
-                    }}>
-                    {item.status}
-                  </Text>
-                </View>
-                <Text className="mt-sm text-base text-muted">
-                  •••• {item.last4}
-                  {item.issuer ? ` · ${item.issuer}` : ''}
-                </Text>
-              </Pressable>
-              {isOwner && item.status === 'active' ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Add recharge for ${item.name}`}
-                  className="mt-md self-start items-center justify-center rounded-lg border border-border px-md"
-                  style={{ minHeight: a11y.minHit }}
-                  onPress={() => openRecharge(item)}>
-                  <Text className="text-sm font-medium text-ink">Add recharge</Text>
-                </Pressable>
-              ) : null}
-              {!isOwner && item.status === 'active' ? (
-                <View className="mt-md flex-row flex-wrap" style={{ gap: 8 }}>
-                  {(() => {
-                    const req = myRequestFor(item.id);
-                    if (req && isPinRevealActive(req)) {
-                      return (
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`View PIN for ${item.name}`}
-                          className="items-center justify-center rounded-lg bg-ink px-md"
-                          style={{ minHeight: a11y.minHit }}
-                          disabled={busy}
-                          onPress={() => void openReveal(item)}>
-                          <Text className="text-sm font-medium text-background">View PIN</Text>
-                        </Pressable>
-                      );
-                    }
-                    if (req?.status === 'pending') {
-                      return (
-                        <Text className="text-sm text-muted">PIN request pending</Text>
-                      );
-                    }
-                    return (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Request PIN for ${item.name}`}
-                        className="items-center justify-center rounded-lg border border-border px-md"
-                        style={{ minHeight: a11y.minHit }}
-                        disabled={busy}
-                        onPress={() => void handleRequestPin(item)}>
-                        <Text className="text-sm font-medium text-ink">Request PIN</Text>
-                      </Pressable>
-                    );
-                  })()}
-                </View>
-              ) : null}
-              {isOwner && item.hasPin ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`View PIN for ${item.name}`}
-                  className="mt-md self-start items-center justify-center rounded-lg border border-border px-md"
-                  style={{ minHeight: a11y.minHit }}
-                  disabled={busy}
-                  onPress={() => void openReveal(item)}>
-                  <Text className="text-sm font-medium text-ink">View PIN</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          )}
+          renderItem={({ item }) => {
+            const balance =
+              balances[item.id] ?? item.serverBalanceSnapshot ?? null;
+            const balanceEstimated =
+              item.serverBalanceSnapshot == null && balance != null;
+            let pinAction: {
+              label: string;
+              onPress: () => void;
+              primary?: boolean;
+              pending?: boolean;
+            } | null = null;
+
+            if (!isOwner && item.status === 'active') {
+              const req = myRequestFor(item.id);
+              if (req && isPinRevealActive(req)) {
+                pinAction = {
+                  label: 'View PIN',
+                  primary: true,
+                  onPress: () => {
+                    void openReveal(item);
+                  },
+                };
+              } else if (req?.status === 'pending') {
+                pinAction = { label: 'PIN request pending', pending: true, onPress: () => undefined };
+              } else {
+                pinAction = {
+                  label: 'Request PIN',
+                  onPress: () => {
+                    void handleRequestPin(item);
+                  },
+                };
+              }
+            } else if (isOwner && item.hasPin) {
+              pinAction = {
+                label: 'View PIN',
+                onPress: () => {
+                  void openReveal(item);
+                },
+              };
+            }
+
+            return (
+              <CardListItem
+                card={item}
+                balance={balance}
+                balanceEstimated={balanceEstimated}
+                isOwner={Boolean(isOwner)}
+                showOpening={isOwner && item.status === 'active' && !openingCardIds.has(item.id)}
+                pinAction={pinAction}
+                onPressCard={() => openEdit(item)}
+                onEdit={() => openEdit(item)}
+                onHistory={() => openHistory(item)}
+                onAddRecharge={
+                  isOwner && item.status === 'active'
+                    ? () => openRecharge(item)
+                    : undefined
+                }
+                onAddOpening={
+                  isOwner && item.status === 'active' && !openingCardIds.has(item.id)
+                    ? () => openOpening(item)
+                    : undefined
+                }
+              />
+            );
+          }}
         />
       )}
 
@@ -661,355 +682,307 @@ export default function CardsScreen() {
         }}
       />
 
-      <Modal visible={formOpen} animationType="slide" transparent onRequestClose={() => setFormOpen(false)}>
-        <View className="flex-1 justify-end bg-black/40">
-          <View className="max-h-[90%] rounded-t-2xl bg-background px-md pb-xl pt-lg">
-            <Text className="text-xl font-semibold text-ink">
-              {editing ? editing.name : 'Add card'}
-            </Text>
-            {isOwner ? (
-              <>
-                <TextInput
-                  value={name}
-                  onChangeText={setName}
-                  placeholder="Card name"
-                  placeholderTextColor={colors.muted}
-                  className="mt-md rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
-                />
-                <TextInput
-                  value={last4}
-                  onChangeText={setLast4}
-                  keyboardType="number-pad"
-                  maxLength={4}
-                  placeholder="Last 4 digits"
-                  placeholderTextColor={colors.muted}
-                  className="mt-md rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
-                />
-                <TextInput
-                  value={issuer}
-                  onChangeText={setIssuer}
-                  placeholder="Issuer (optional)"
-                  placeholderTextColor={colors.muted}
-                  className="mt-md rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
-                />
-                <TextInput
-                  value={pinText}
-                  onChangeText={setPinText}
-                  keyboardType="number-pad"
-                  maxLength={12}
-                  secureTextEntry
-                  placeholder={editing?.hasPin ? 'New PIN (optional)' : 'PIN (optional)'}
-                  placeholderTextColor={colors.muted}
-                  className="mt-md rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
-                />
-                {!editing ? (
-                  <View className="mt-md">
-                    <Text className="mb-sm text-sm font-medium uppercase tracking-wide text-muted">
-                      Opening balance (optional)
-                    </Text>
-                    <AmountField value={openingText} onChangeText={setOpeningText} />
-                  </View>
-                ) : null}
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Save card"
-                  className="mt-lg items-center rounded-lg bg-ink px-md py-md"
+      <BottomSheet
+        visible={formOpen}
+        title={editing ? 'Edit card' : 'Add card'}
+        onClose={() => setFormOpen(false)}
+        footer={
+          isOwner ? (
+            <SheetActions>
+              {editing?.status === 'active' ? (
+                <AppButton
+                  label="Deactivate"
+                  variant="danger"
                   disabled={busy}
-                  onPress={() => void saveCard()}>
-                  <Text className="text-base font-semibold text-background">
-                    {busy ? 'Saving…' : 'Save'}
-                  </Text>
-                </Pressable>
-              </>
-            ) : null}
-
-            {editing ? (
-              <View className="mt-lg">
-                <Text className="text-sm font-medium uppercase tracking-wide text-muted">
-                  Card activity
-                </Text>
-                {timelineLoading ? (
-                  <ActivityIndicator className="mt-md" color={colors.accent} />
-                ) : timeline.length === 0 ? (
-                  <Text className="mt-sm text-sm text-muted">No recharges or adjustments yet.</Text>
-                ) : (
-                  timeline.map((entry) => {
-                    if (entry.kind === 'recharge') {
-                      const item = entry.item;
-                      const alreadyReversed = reversedIds.has(item.id);
-                      return (
-                        <View key={`r-${item.id}`} className="mt-sm border-b border-border py-sm">
-                          <Text className="text-base font-semibold text-ink">
-                            {formatPkr(item.amount)}
-                          </Text>
-                          <Text className="text-sm text-muted">
-                            Recharge
-                            {item.month ? ` · ${item.month}` : ''}
-                            {item.source ? ` · ${item.source}` : ''}
-                            {alreadyReversed ? ' · reversed' : ''}
-                          </Text>
-                          {isOwner && !alreadyReversed ? (
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityLabel="Reverse recharge"
-                              className="mt-sm self-start justify-center"
-                              style={{ minHeight: a11y.minHit }}
-                              disabled={busy}
-                              onPress={() => confirmReverseRecharge(item)}>
-                              <Text className="text-sm font-medium" style={{ color: colors.danger }}>
-                                Reverse recharge
-                              </Text>
-                            </Pressable>
-                          ) : null}
-                        </View>
-                      );
-                    }
-
-                    const item = entry.item;
-                    return (
-                      <View key={`a-${item.id}`} className="mt-sm border-b border-border py-sm">
-                        <Text className="text-base font-semibold text-ink">
-                          {formatPkr(item.amount)}
-                        </Text>
-                        <Text className="text-sm text-muted">
-                          {item.kind}
-                          {item.reason ? ` · ${item.reason}` : ''}
-                        </Text>
-                      </View>
-                    );
-                  })
-                )}
-                {isOwner && editing.status === 'active' ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Add recharge"
-                    className="mt-md items-center rounded-lg border border-border px-md py-md"
-                    onPress={() => openRecharge(editing)}>
-                    <Text className="text-base font-semibold text-ink">Add recharge</Text>
-                  </Pressable>
-                ) : null}
-                {isOwner && !hasOpening ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Set opening balance"
-                    className="mt-md items-center rounded-lg border border-border px-md py-md"
-                    onPress={() => {
-                      setOpeningOnlyText('');
-                      setOpeningOpen(true);
-                    }}>
-                    <Text className="text-base font-semibold text-ink">Set opening balance</Text>
-                  </Pressable>
-                ) : null}
+                  onPress={() => confirmDeactivate(editing)}
+                />
+              ) : editing?.status === 'inactive' ? (
+                <AppButton
+                  label="Reactivate"
+                  variant="secondary"
+                  disabled={busy}
+                  onPress={() => void reactivate(editing)}
+                />
+              ) : (
+                <AppButton label="Cancel" variant="secondary" onPress={() => setFormOpen(false)} />
+              )}
+              <AppButton label={busy ? 'Saving…' : 'Save'} busy={busy} onPress={() => void saveCard()} />
+            </SheetActions>
+          ) : undefined
+        }>
+        {isOwner ? (
+          <>
+            <FieldLabel text="Card name" color={colors.muted} />
+            <TextInput
+              value={name}
+              onChangeText={setName}
+              placeholder="e.g. PSO Shell"
+              placeholderTextColor={colors.muted}
+              style={fieldStyle(colors)}
+            />
+            <FieldLabel text="Last 4 digits" color={colors.muted} />
+            <TextInput
+              value={last4}
+              onChangeText={setLast4}
+              keyboardType="number-pad"
+              maxLength={4}
+              placeholder="4821"
+              placeholderTextColor={colors.muted}
+              style={fieldStyle(colors)}
+            />
+            <FieldLabel text="Issuer" color={colors.muted} />
+            <TextInput
+              value={issuer}
+              onChangeText={setIssuer}
+              placeholder="Optional"
+              placeholderTextColor={colors.muted}
+              style={fieldStyle(colors)}
+            />
+            <FieldLabel text="PIN" color={colors.muted} />
+            <TextInput
+              value={pinText}
+              onChangeText={setPinText}
+              keyboardType="number-pad"
+              maxLength={12}
+              secureTextEntry
+              placeholder={editing?.hasPin ? 'New PIN (optional)' : 'Optional'}
+              placeholderTextColor={colors.muted}
+              style={fieldStyle(colors)}
+            />
+            {!editing ? (
+              <View className="mt-md">
+                <FieldLabel text="Opening balance (optional)" color={colors.muted} />
+                <AmountField value={openingText} onChangeText={setOpeningText} label="Amount (PKR)" />
               </View>
             ) : null}
+          </>
+        ) : (
+          <Text className="text-base text-muted">Only the owner can edit card details.</Text>
+        )}
+      </BottomSheet>
 
-            {isOwner && editing && editing.status === 'active' ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Deactivate card"
-                className="mt-md items-center rounded-lg border border-border px-md py-md"
-                disabled={busy}
-                onPress={() => confirmDeactivate(editing)}>
-                <Text className="text-base font-semibold" style={{ color: colors.danger }}>
-                  Deactivate card
+      <BottomSheet
+        visible={historyOpen}
+        title={historyCard ? `History · ${historyCard.name}` : 'Card history'}
+        onClose={() => {
+          setHistoryOpen(false);
+          setHistoryCard(null);
+          setTimeline([]);
+        }}>
+        {timelineLoading ? (
+          <ActivityIndicator className="mt-md" color={colors.accent} />
+        ) : timeline.length === 0 ? (
+          <Text className="mt-sm text-base text-muted">No recharges or adjustments yet.</Text>
+        ) : (
+          timeline.map((entry) => {
+            if (entry.kind === 'recharge') {
+              const item = entry.item;
+              const alreadyReversed = reversedIds.has(item.id);
+              return (
+                <View key={`r-${item.id}`} className="mt-sm border-b border-border py-sm">
+                  <Text className="text-base font-semibold text-ink">
+                    {formatPkr(item.amount)}
+                  </Text>
+                  <Text className="text-sm text-muted">
+                    Recharge
+                    {item.month ? ` · ${item.month}` : ''}
+                    {item.source ? ` · ${item.source}` : ''}
+                    {alreadyReversed ? ' · reversed' : ''}
+                  </Text>
+                  {isOwner && !alreadyReversed ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Reverse recharge"
+                      className="mt-sm self-start justify-center"
+                      style={{ minHeight: a11y.minHit }}
+                      disabled={busy}
+                      onPress={() => confirmReverseRecharge(item)}>
+                      <Text className="text-sm font-medium" style={{ color: colors.danger }}>
+                        Reverse recharge
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              );
+            }
+
+            const item = entry.item;
+            return (
+              <View key={`a-${item.id}`} className="mt-sm border-b border-border py-sm">
+                <Text className="text-base font-semibold text-ink">
+                  {formatPkr(item.amount)}
                 </Text>
-              </Pressable>
-            ) : null}
-            {isOwner && editing && editing.status === 'inactive' ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Reactivate card"
-                className="mt-md items-center rounded-lg border border-border px-md py-md"
-                disabled={busy}
-                onPress={() => void reactivate(editing)}>
-                <Text className="text-base font-semibold text-ink">Reactivate card</Text>
-              </Pressable>
-            ) : null}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close"
-              className="mt-md items-center py-md"
-              onPress={() => setFormOpen(false)}>
-              <Text className="text-base text-muted">Close</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+                <Text className="text-sm text-muted">
+                  {item.kind}
+                  {item.reason ? ` · ${item.reason}` : ''}
+                </Text>
+              </View>
+            );
+          })
+        )}
+      </BottomSheet>
 
-      <Modal
+      <BottomSheet
         visible={rechargeOpen}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setRechargeOpen(false)}>
-        <View className="flex-1 justify-end bg-black/40">
-          <View className="rounded-t-2xl bg-background px-md pb-xl pt-lg">
-            <Text className="text-xl font-semibold text-ink">
-              Add recharge{rechargeCard ? ` · ${rechargeCard.name}` : ''}
-            </Text>
-            <View className="mt-lg">
-              <AmountField value={amountText} onChangeText={setAmountText} />
-            </View>
-            <TextInput
-              value={source}
-              onChangeText={setSource}
-              placeholder="Source (optional)"
-              placeholderTextColor={colors.muted}
-              className="mt-md rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
-            />
-            <TextInput
-              value={notes}
-              onChangeText={setNotes}
-              placeholder="Notes (optional)"
-              placeholderTextColor={colors.muted}
-              className="mt-md rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
-            />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Save recharge"
-              className="mt-lg items-center rounded-lg bg-ink px-md py-md"
+        title={rechargeCard ? `Add recharge · ${rechargeCard.name}` : 'Add recharge'}
+        onClose={() => setRechargeOpen(false)}
+        footer={
+          <SheetActions>
+            <AppButton
+              label="Cancel"
+              variant="secondary"
               disabled={busy}
-              onPress={() => void saveRecharge()}>
-              <Text className="text-base font-semibold text-background">
-                {busy ? 'Saving…' : 'Save recharge'}
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Cancel recharge"
-              className="mt-md items-center py-md"
-              onPress={() => setRechargeOpen(false)}>
-              <Text className="text-base text-muted">Cancel</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+              onPress={() => setRechargeOpen(false)}
+            />
+            <AppButton
+              label={busy ? 'Saving…' : 'Save'}
+              busy={busy}
+              onPress={() => void saveRecharge()}
+            />
+          </SheetActions>
+        }>
+        <AmountField value={amountText} onChangeText={setAmountText} />
+        <TextInput
+          value={source}
+          onChangeText={setSource}
+          placeholder="Source (optional)"
+          placeholderTextColor={colors.muted}
+          style={[fieldStyle(colors), { marginTop: 12 }]}
+        />
+        <TextInput
+          value={notes}
+          onChangeText={setNotes}
+          placeholder="Notes (optional)"
+          placeholderTextColor={colors.muted}
+          style={[fieldStyle(colors), { marginTop: 12 }]}
+        />
+      </BottomSheet>
 
-      <Modal
+      <BottomSheet
         visible={openingOpen}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setOpeningOpen(false)}>
-        <View className="flex-1 justify-end bg-black/40">
-          <View className="rounded-t-2xl bg-background px-md pb-xl pt-lg">
-            <Text className="text-xl font-semibold text-ink">
-              Opening balance{editing ? ` · ${editing.name}` : ''}
-            </Text>
-            <Text className="mt-sm text-base text-muted">
-              Creates an OPENING adjustment. This does not edit past amounts.
-            </Text>
-            <View className="mt-lg">
-              <AmountField value={openingOnlyText} onChangeText={setOpeningOnlyText} />
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Save opening balance"
-              className="mt-lg items-center rounded-lg bg-ink px-md py-md"
+        title={openingCard ? `Opening · ${openingCard.name}` : 'Opening balance'}
+        onClose={() => {
+          setOpeningOpen(false);
+          setOpeningCard(null);
+        }}
+        footer={
+          <SheetActions>
+            <AppButton
+              label="Cancel"
+              variant="secondary"
               disabled={busy}
-              onPress={() => void saveOpeningOnly()}>
-              <Text className="text-base font-semibold text-background">
-                {busy ? 'Saving…' : 'Save opening balance'}
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Cancel opening balance"
-              className="mt-md items-center py-md"
-              onPress={() => setOpeningOpen(false)}>
-              <Text className="text-base text-muted">Cancel</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={resolveOpen}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setResolveOpen(false)}>
-        <View className="flex-1 justify-end bg-black/40">
-          <View className="rounded-t-2xl bg-background px-md pb-xl pt-lg">
-            <Text className="text-xl font-semibold text-ink">PIN request</Text>
-            <Text className="mt-sm text-base text-muted">
-              Approve to share a time-limited PIN view. Reject to deny. Share extends access.
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Approve PIN request"
-              className="mt-lg items-center rounded-lg bg-ink px-md py-md"
-              disabled={busy}
-              onPress={() => void handleResolve('approved')}>
-              <Text className="text-base font-semibold text-background">
-                {busy ? 'Working…' : 'Approve and share'}
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Share PIN access"
-              className="mt-md items-center rounded-lg border border-border px-md py-md"
-              disabled={busy}
-              onPress={() => void handleShare()}>
-              <Text className="text-base font-semibold text-ink">Share access</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Reject PIN request"
-              className="mt-md items-center rounded-lg border border-border px-md py-md"
-              disabled={busy}
-              onPress={() => void handleResolve('rejected')}>
-              <Text className="text-base font-semibold" style={{ color: colors.danger }}>
-                Reject
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close PIN request"
-              className="mt-md items-center py-md"
               onPress={() => {
-                setResolveOpen(false);
-                setResolveTarget(null);
-              }}>
-              <Text className="text-base text-muted">Close</Text>
-            </Pressable>
-          </View>
+                setOpeningOpen(false);
+                setOpeningCard(null);
+              }}
+            />
+            <AppButton
+              label={busy ? 'Saving…' : 'Save'}
+              busy={busy}
+              onPress={() => void saveOpeningOnly()}
+            />
+          </SheetActions>
+        }>
+        <Text className="text-base text-muted">
+          Creates an OPENING adjustment. This does not edit past amounts.
+        </Text>
+        <View className="mt-lg">
+          <AmountField value={openingOnlyText} onChangeText={setOpeningOnlyText} />
         </View>
-      </Modal>
+      </BottomSheet>
 
-      <Modal
+      <BottomSheet
+        visible={resolveOpen}
+        title="PIN request"
+        onClose={() => {
+          setResolveOpen(false);
+          setResolveTarget(null);
+        }}
+        footer={
+          <View style={{ gap: 8 }}>
+            <SheetActions>
+              <AppButton
+                label="Reject"
+                variant="danger"
+                disabled={busy}
+                onPress={() => void handleResolve('rejected')}
+              />
+              <AppButton
+                label={busy ? 'Working…' : 'Approve'}
+                busy={busy}
+                onPress={() => void handleResolve('approved')}
+              />
+            </SheetActions>
+            <AppButton
+              label="Share access"
+              variant="secondary"
+              disabled={busy}
+              onPress={() => void handleShare()}
+            />
+          </View>
+        }>
+        <Text className="text-base text-muted">
+          Approve to share a time-limited PIN view. Reject to deny. Share extends access.
+        </Text>
+      </BottomSheet>
+
+      <BottomSheet
         visible={revealOpen}
-        animationType="slide"
-        transparent
-        onRequestClose={() => {
+        title={revealCard ? `Card PIN · ${revealCard.name}` : 'Card PIN'}
+        onClose={() => {
           setRevealOpen(false);
           setRevealPin(null);
           setRevealCard(null);
-        }}>
-        <View className="flex-1 justify-end bg-black/40">
-          <View className="rounded-t-2xl bg-background px-md pb-xl pt-lg">
-            <Text className="text-xl font-semibold text-ink">
-              Card PIN{revealCard ? ` · ${revealCard.name}` : ''}
-            </Text>
-            <Text className="mt-sm text-base text-muted">
-              Shown briefly. Do not screenshot or share outside the fuel stop.
-            </Text>
-            <Text
-              className="mt-lg text-center text-4xl font-bold tracking-widest text-ink"
-              accessibilityLabel="Card PIN value">
-              {revealPin ?? '----'}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Hide PIN"
-              className="mt-xl items-center rounded-lg bg-ink px-md py-md"
-              onPress={() => {
-                setRevealOpen(false);
-                setRevealPin(null);
-                setRevealCard(null);
-              }}>
-              <Text className="text-base font-semibold text-background">Hide PIN</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+        }}
+        footer={
+          <AppButton
+            label="Hide PIN"
+            onPress={() => {
+              setRevealOpen(false);
+              setRevealPin(null);
+              setRevealCard(null);
+            }}
+          />
+        }>
+        <Text className="text-base text-muted">
+          Shown briefly. Do not screenshot or share outside the fuel stop.
+        </Text>
+        <Text
+          className="mt-lg text-center text-4xl font-bold tracking-widest text-ink"
+          accessibilityLabel="Card PIN value">
+          {revealPin ?? '----'}
+        </Text>
+      </BottomSheet>
     </View>
+  );
+}
+
+function fieldStyle(colors: { border: string; surface: string; ink: string }) {
+  return {
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    color: colors.ink,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    marginBottom: 12,
+  };
+}
+
+function FieldLabel({ text, color }: { text: string; color: string }) {
+  return (
+    <Text
+      style={{
+        color,
+        fontSize: 12,
+        fontWeight: '600',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
+        marginBottom: 6,
+      }}>
+      {text}
+    </Text>
   );
 }

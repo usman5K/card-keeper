@@ -3,8 +3,10 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BalanceHero } from '@/components/BalanceHero';
+import { ChipRow } from '@/components/ChipRow';
 import { EmptyState } from '@/components/EmptyState';
 import { ReportsSkeleton } from '@/components/ReportsSkeleton';
+import { SelectField } from '@/components/SelectField';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { useOrg } from '@/features/org/OrgProvider';
 import { exportCsvFile } from '@/features/reports/exportCsv';
@@ -14,7 +16,9 @@ import {
   loadReportLookups,
 } from '@/features/reports/reportService';
 import { useSync } from '@/features/sync/SyncProvider';
-import { a11y, colors } from '@/theme/tokens';
+import { useTheme } from '@/features/theme/ThemeProvider';
+import { toast } from '@/features/toast/ToastProvider';
+import { a11y } from '@/theme/tokens';
 import { formatPkr } from '@/utils/money';
 import {
   buildExportRows,
@@ -43,6 +47,7 @@ const GROUP_KINDS: ReportGroupKind[] = [
 ];
 
 export default function ReportsScreen() {
+  const { colors } = useTheme();
   const { user } = useAuth();
   const { orgId, orgName, member } = useOrg();
   const { balanceTrusted, isOnline } = useSync();
@@ -57,8 +62,6 @@ export default function ReportsScreen() {
   const [cardNames, setCardNames] = useState<NameLookup>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -135,8 +138,6 @@ export default function ReportsScreen() {
       return;
     }
     setExporting(true);
-    setMessage(null);
-    setExportError(null);
     try {
       const rows = buildExportRows({
         fuel,
@@ -145,23 +146,21 @@ export default function ReportsScreen() {
         cardNames,
       });
       if (rows.length === 0) {
-        setExportError('Nothing to export for this period.');
+        toast.info('Nothing to export for this period.');
         return;
       }
       const csv = buildFuelCsv(rows);
       const stamp = new Date().toISOString().slice(0, 10);
       const result = await exportCsvFile(`fuelledger-${period}-${stamp}.csv`, csv);
       if (!result.ok) {
-        setExportError(result.reason);
+        toast.error(result.reason);
         return;
       }
-      setMessage(
-        result.method === 'download'
-          ? 'CSV downloaded.'
-          : 'CSV ready to share.',
+      toast.success(
+        result.method === 'download' ? 'CSV downloaded.' : 'CSV ready to share.',
       );
     } catch (err) {
-      setExportError(err instanceof Error ? err.message : 'Could not export CSV');
+      toast.error(err instanceof Error ? err.message : 'Could not export CSV');
     } finally {
       setExporting(false);
     }
@@ -218,33 +217,15 @@ export default function ReportsScreen() {
       {!loading && !loadError ? (
         <>
           <View className="mt-lg">
-            <Text className="mb-sm text-sm font-medium text-muted">Period</Text>
-            <View className="flex-row flex-wrap gap-sm">
-              {reportPeriodOptions().map((option) => {
-                const selected = option.value === period;
-                return (
-                  <Pressable
-                    key={option.value}
-                    onPress={() => setPeriod(option.value)}
-                    className="items-center justify-center rounded-lg px-md"
-                    style={{
-                      minHeight: a11y.minHit,
-                      backgroundColor: selected ? colors.accent : colors.surface,
-                      borderWidth: 1,
-                      borderColor: selected ? colors.accent : colors.border,
-                    }}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    accessibilityLabel={`Period ${option.label}`}>
-                    <Text
-                      className="text-sm font-medium"
-                      style={{ color: selected ? '#FFFFFF' : colors.ink }}>
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <SelectField
+              label="Period"
+              value={period}
+              options={reportPeriodOptions().map((option) => ({
+                value: option.value,
+                label: option.label,
+              }))}
+              onChange={(value) => setPeriod(value as ReportPeriod)}
+            />
           </View>
 
           <View className="mt-xl">
@@ -265,34 +246,16 @@ export default function ReportsScreen() {
 
           <View className="mt-xl">
             <Text className="mb-sm text-sm font-medium text-muted">Group by</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View className="flex-row gap-sm">
-                {GROUP_KINDS.map((kind) => {
-                  const selected = kind === groupKind;
-                  return (
-                    <Pressable
-                      key={kind}
-                      onPress={() => setGroupKind(kind)}
-                      className="items-center justify-center rounded-lg px-md"
-                      style={{
-                        minHeight: a11y.minHit,
-                        backgroundColor: selected ? colors.accentSoft : colors.surface,
-                        borderWidth: 1,
-                        borderColor: selected ? colors.accent : colors.border,
-                      }}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                      accessibilityLabel={groupKindLabel(kind)}>
-                      <Text
-                        className="text-sm font-medium"
-                        style={{ color: selected ? colors.accent : colors.ink }}>
-                        {groupKindLabel(kind)}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </ScrollView>
+            <ChipRow
+              options={GROUP_KINDS.map((kind) => groupKindLabel(kind))}
+              selected={groupKindLabel(groupKind)}
+              onSelect={(label) => {
+                const next = GROUP_KINDS.find((kind) => groupKindLabel(kind) === label);
+                if (next) {
+                  setGroupKind(next);
+                }
+              }}
+            />
           </View>
 
           <View className="mt-lg">
@@ -349,16 +312,6 @@ export default function ReportsScreen() {
             </Text>
           </Pressable>
 
-          {message ? (
-            <Text className="mt-md text-center text-sm" style={{ color: colors.accent }}>
-              {message}
-            </Text>
-          ) : null}
-          {exportError ? (
-            <Text className="mt-md text-center text-sm" style={{ color: colors.danger }}>
-              {exportError}
-            </Text>
-          ) : null}
         </>
       ) : null}
     </ScrollView>

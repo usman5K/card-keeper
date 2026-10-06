@@ -11,8 +11,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { OrgProvider, useOrg } from '@/features/org/OrgProvider';
 import { SyncProvider } from '@/features/sync/SyncProvider';
+import { ThemeProvider, useTheme } from '@/features/theme/ThemeProvider';
+import { ToastProvider } from '@/features/toast/ToastProvider';
 import { getFirebaseAuth } from '@/firebase/auth';
-import { colors } from '@/theme/tokens';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -27,6 +28,7 @@ if (Platform.OS !== 'web') {
 function AuthRedirect() {
   const { user, loading } = useAuth();
   const { ready, orgId } = useOrg();
+  const { colors } = useTheme();
   const segments = useSegments();
   const router = useRouter();
   const liveUser = getFirebaseAuth()?.currentUser ?? user;
@@ -73,12 +75,43 @@ function AuthRedirect() {
   if (waiting) {
     return (
       <View className="absolute inset-0 z-50 items-center justify-center bg-background">
-        <ActivityIndicator color={colors.accent} />
+        <ActivityIndicator color={colors.accent} size="large" />
       </View>
     );
   }
 
   return null;
+}
+
+function RootTree() {
+  const { colors } = useTheme();
+
+  return (
+    <AuthProvider>
+      <OrgProvider>
+        <SyncProvider>
+          <View className="flex-1 bg-background">
+            <Stack
+              screenOptions={{
+                headerStyle: { backgroundColor: colors.background },
+                headerTintColor: colors.accent,
+                headerTitleStyle: { color: colors.ink, fontWeight: '600' },
+                contentStyle: { backgroundColor: colors.background },
+              }}>
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="login" options={{ headerShown: false }} />
+              <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+              <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+              <Stack.Screen name="audit" options={{ title: 'Audit log' }} />
+              <Stack.Screen name="conflicts" options={{ title: 'Conflict review' }} />
+              <Stack.Screen name="person/[userId]" options={{ title: 'Person' }} />
+            </Stack>
+            <AuthRedirect />
+          </View>
+        </SyncProvider>
+      </OrgProvider>
+    </AuthProvider>
+  );
 }
 
 export default function RootLayout() {
@@ -98,32 +131,23 @@ export default function RootLayout() {
 
   if (!loaded) {
     return (
-      <View className="flex-1 items-center justify-center bg-background">
-        <ActivityIndicator color={colors.accent} />
-      </View>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <View className="flex-1 items-center justify-center bg-background">
+            <ActivityIndicator />
+          </View>
+        </ThemeProvider>
+      </SafeAreaProvider>
     );
   }
 
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <OrgProvider>
-          <SyncProvider>
-            <View className="flex-1 bg-background">
-              <Stack>
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                <Stack.Screen name="login" options={{ headerShown: false }} />
-                <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-                <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-                <Stack.Screen name="audit" options={{ title: 'Audit log' }} />
-                <Stack.Screen name="conflicts" options={{ title: 'Conflict review' }} />
-                <Stack.Screen name="person/[userId]" options={{ title: 'Person' }} />
-              </Stack>
-              <AuthRedirect />
-            </View>
-          </SyncProvider>
-        </OrgProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <ToastProvider>
+          <RootTree />
+        </ToastProvider>
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }

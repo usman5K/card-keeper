@@ -23,7 +23,9 @@ import {
   resolveConflictWithReverse,
   type ConflictFuelDoc,
 } from '@/features/sync/conflictService';
-import { a11y, colors } from '@/theme/tokens';
+import { useTheme } from '@/features/theme/ThemeProvider';
+import { toast } from '@/features/toast/ToastProvider';
+import { a11y } from '@/theme/tokens';
 import { formatPkr, parsePkrInput } from '@/utils/money';
 
 type PendingConfirm = {
@@ -34,6 +36,7 @@ type PendingConfirm = {
   run: () => Promise<void>;
 };
 export default function ConflictsScreen() {
+  const { colors } = useTheme();
   const { user } = useAuth();
   const { orgId, member } = useOrg();
   const { refresh: refreshSync } = useSync();
@@ -100,12 +103,12 @@ export default function ConflictsScreen() {
           return;
         }
         setBusy(true);
-        setError(null);
         try {
           await acknowledgeConflict(orgId, user.uid, item.id, 'acknowledge');
+          toast.success('Conflict acknowledged.');
           afterResolve();
         } catch (err) {
-          setError(err instanceof Error ? err.message : 'Acknowledge failed');
+          toast.error(err instanceof Error ? err.message : 'Acknowledge failed');
         } finally {
           setBusy(false);
         }
@@ -124,12 +127,12 @@ export default function ConflictsScreen() {
           return;
         }
         setBusy(true);
-        setError(null);
         try {
           await resolveConflictWithReverse(orgId, user.uid, item);
+          toast.success('Conflict reversed.');
           afterResolve();
         } catch (err) {
-          setError(err instanceof Error ? err.message : 'Reverse failed');
+          toast.error(err instanceof Error ? err.message : 'Reverse failed');
         } finally {
           setBusy(false);
         }
@@ -142,7 +145,6 @@ export default function ConflictsScreen() {
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       const amount = parsePkrInput(amountText);
       await resolveConflictWithAdjust(
@@ -155,9 +157,10 @@ export default function ConflictsScreen() {
       setAdjustTarget(null);
       setAmountText('');
       setReason('');
+      toast.success('Conflict adjusted.');
       afterResolve();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Adjust failed');
+      toast.error(err instanceof Error ? err.message : 'Adjust failed');
     } finally {
       setBusy(false);
     }
@@ -186,11 +189,6 @@ export default function ConflictsScreen() {
   return (
     <View className="flex-1 bg-background" style={{ paddingBottom: insets.bottom }}>
       <Stack.Screen options={{ title: 'Conflict review' }} />
-      {error && items.length > 0 ? (
-        <Text className="px-md pt-md text-sm" style={{ color: colors.danger }}>
-          {error}
-        </Text>
-      ) : null}
       {loading ? (
         <ActivityIndicator className="mt-xl" color={colors.accent} />
       ) : error && items.length === 0 ? (

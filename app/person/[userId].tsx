@@ -24,7 +24,8 @@ import {
   getPersonOutstanding,
   type SettlementDoc,
 } from '@/features/settlements/settlementService';
-import { colors } from '@/theme/tokens';
+import { useTheme } from '@/features/theme/ThemeProvider';
+import { toast } from '@/features/toast/ToastProvider';
 import type { FuelCardDoc } from '@/types/card';
 import { formatPkr, parsePkrInput } from '@/utils/money';
 import {
@@ -36,6 +37,7 @@ import {
 } from '@/utils/peopleDashboard';
 
 export default function PersonDetailScreen() {
+  const { colors } = useTheme();
   const { userId: rawUserId } = useLocalSearchParams<{ userId: string }>();
   const userId = Array.isArray(rawUserId) ? rawUserId[0] : rawUserId;
   const { user } = useAuth();
@@ -50,8 +52,6 @@ export default function PersonDetailScreen() {
   const [settledTotal, setSettledTotal] = useState(0);
   const [settlements, setSettlements] = useState<SettlementDoc[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [amountText, setAmountText] = useState('');
@@ -79,7 +79,6 @@ export default function PersonDetailScreen() {
     const target = members.find((item) => item.id === userId) ?? null;
     if (!target) {
       setPerson(null);
-      setError('Member not found');
       setLoading(false);
       return;
     }
@@ -97,7 +96,6 @@ export default function PersonDetailScreen() {
     setSettledTotal(row.settledTotal);
     setSettlements(row.settlements);
     setCards(nextCards);
-    setError(null);
   }, [orgId, member, user, userId, allowed, isOwner]);
 
   useEffect(() => {
@@ -109,7 +107,7 @@ export default function PersonDetailScreen() {
           await load();
         } catch (err) {
           if (!cancelled) {
-            setError(err instanceof Error ? err.message : 'Could not load member');
+            toast.error(err instanceof Error ? err.message : 'Could not load member');
           }
         } finally {
           if (!cancelled) {
@@ -129,7 +127,6 @@ export default function PersonDetailScreen() {
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       const amount = parsePkrInput(amountText);
       const input: SettlementInput = {
@@ -140,14 +137,14 @@ export default function PersonDetailScreen() {
       };
       await createSettlement(orgId, user.uid, input, { role: member.role });
       setSheetOpen(false);
-      setMessage(
+      toast.success(
         member.role === 'owner'
           ? 'Settlement recorded and confirmed.'
           : 'Settlement submitted for owner confirmation.',
       );
       setReloadKey((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save settlement');
+      toast.error(err instanceof Error ? err.message : 'Could not save settlement');
     } finally {
       setBusy(false);
     }
@@ -158,13 +155,12 @@ export default function PersonDetailScreen() {
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       await confirmSettlement(orgId, item.id, user.uid);
-      setMessage('Settlement confirmed.');
+      toast.success('Settlement confirmed.');
       setReloadKey((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not confirm settlement');
+      toast.error(err instanceof Error ? err.message : 'Could not confirm settlement');
     } finally {
       setBusy(false);
     }
@@ -175,20 +171,21 @@ export default function PersonDetailScreen() {
       return;
     }
     const current = new Set(person.assignedCardIds ?? []);
-    if (current.has(cardId)) {
-      current.delete(cardId);
-    } else {
+    const assigning = !current.has(cardId);
+    if (assigning) {
       current.add(cardId);
+    } else {
+      current.delete(cardId);
     }
     const nextIds = [...current];
     setBusy(true);
-    setError(null);
     try {
       await setMemberAssignedCards(orgId, person.id, nextIds);
       setPerson({ ...person, assignedCardIds: nextIds });
       await refresh();
+      toast.success(assigning ? 'Card assigned.' : 'Card unassigned.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Assignment failed');
+      toast.error(err instanceof Error ? err.message : 'Assignment failed');
     } finally {
       setBusy(false);
     }
@@ -257,13 +254,6 @@ export default function PersonDetailScreen() {
                 }}>
                 <Text className="text-base font-semibold text-background">Record payment</Text>
               </Pressable>
-
-              {error ? (
-                <Text className="mt-md text-sm" style={{ color: colors.danger }}>
-                  {error}
-                </Text>
-              ) : null}
-              {message ? <Text className="mt-md text-sm text-online">{message}</Text> : null}
 
               <View className="mt-xl">
                 <Text className="text-sm font-medium uppercase tracking-wide text-muted">

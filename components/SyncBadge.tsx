@@ -18,7 +18,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { a11y, colors } from '@/theme/tokens';
+import { useTheme } from '@/features/theme/ThemeProvider';
 import { syncUiLabel, type SyncUiStatus } from '@/utils/syncStatus';
 
 type Props = {
@@ -28,10 +28,12 @@ type Props = {
   pressable?: boolean;
 };
 
-function tintFor(status: SyncUiStatus) {
+function tintFor(
+  status: SyncUiStatus,
+  colors: { online: string; offline: string; danger: string },
+) {
   switch (status) {
     case 'offline':
-      return colors.offline;
     case 'pending':
     case 'syncing':
       return colors.offline;
@@ -71,7 +73,8 @@ export function SyncBadge({
   pressable = true,
 }: Props) {
   const router = useRouter();
-  const tint = tintFor(status);
+  const { colors } = useTheme();
+  const tint = tintFor(status, colors);
   const label = syncUiLabel(status);
   const detail =
     status === 'conflict' && conflictCount > 0
@@ -103,12 +106,17 @@ export function SyncBadge({
 
   const content = (
     <View
-      className="flex-row items-center self-start rounded-full bg-accent-soft px-3"
-      style={{ minHeight: a11y.minHit, paddingVertical: 8 }}>
+      className="flex-row items-center self-start rounded-full px-sm"
+      style={{
+        minHeight: 32,
+        paddingVertical: 4,
+        paddingHorizontal: 10,
+        backgroundColor: colors.accentSoft,
+      }}>
       <Animated.View style={status === 'syncing' ? iconStyle : undefined}>
         <IconFor status={status} tint={tint} />
       </Animated.View>
-      <Text style={{ color: tint, marginLeft: 8 }} className="text-sm font-medium">
+      <Text style={{ color: tint, marginLeft: 6, fontSize: 12, fontWeight: '600' }}>
         {label}
         {detail}
       </Text>

@@ -1,6 +1,6 @@
 import { Text, TextInput, View } from 'react-native';
 
-import { colors } from '@/theme/tokens';
+import { useTheme } from '@/features/theme/ThemeProvider';
 
 type AmountFieldProps = {
   value: string;
@@ -15,9 +15,13 @@ export function AmountField({
   label = 'Amount (PKR)',
   accessibilityLabel = 'Amount in PKR',
 }: AmountFieldProps) {
+  const { colors } = useTheme();
+
   return (
     <View>
-      <Text className="text-sm font-medium uppercase tracking-wide text-muted">{label}</Text>
+      <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600', letterSpacing: 0.6 }}>
+        {label.toUpperCase()}
+      </Text>
       <TextInput
         value={value}
         onChangeText={onChangeText}
@@ -25,7 +29,18 @@ export function AmountField({
         placeholder="0"
         placeholderTextColor={colors.muted}
         accessibilityLabel={accessibilityLabel}
-        className="mt-sm rounded-lg border border-border bg-surface px-md py-md text-3xl font-bold text-ink"
+        style={{
+          marginTop: 8,
+          borderWidth: 1,
+          borderColor: colors.border,
+          backgroundColor: colors.surface,
+          color: colors.ink,
+          borderRadius: 12,
+          paddingHorizontal: 16,
+          paddingVertical: 14,
+          fontSize: 32,
+          fontWeight: '700',
+        }}
       />
     </View>
   );

@@ -1,35 +1,36 @@
 import { View } from 'react-native';
 
-import { colors } from '@/theme/tokens';
+import { useTheme } from '@/features/theme/ThemeProvider';
 
 function Bar({
   height,
-  width,
   className,
+  color,
 }: {
   height: number;
-  width?: number | `${number}%`;
   className?: string;
+  color: string;
 }) {
   return (
     <View
       className={className}
       style={{
         height,
-        width: width ?? '100%',
-        backgroundColor: colors.border,
-        borderRadius: 8,
+        width: '100%',
+        backgroundColor: color,
+        borderRadius: 16,
       }}
     />
   );
 }
 
 export function CardsSkeleton() {
+  const { colors } = useTheme();
   return (
     <View className="mt-lg px-md" accessibilityLabel="Loading cards">
-      <Bar height={88} />
-      <Bar className="mt-md" height={88} />
-      <Bar className="mt-md" height={88} />
+      <Bar color={colors.border} height={148} />
+      <Bar className="mt-md" color={colors.border} height={148} />
+      <Bar className="mt-md" color={colors.border} height={148} />
     </View>
   );
 }
