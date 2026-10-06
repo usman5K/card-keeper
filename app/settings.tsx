@@ -8,6 +8,7 @@ import { OfflineBanner } from '@/components/OfflineBanner';
 import { SelectField } from '@/components/SelectField';
 import { ThemePicker } from '@/components/ThemePicker';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { orgCapabilities } from '@/features/org/capabilities';
 import { useOrg } from '@/features/org/OrgProvider';
 import { useSync } from '@/features/sync/SyncProvider';
 import { useTheme } from '@/features/theme/ThemeProvider';
@@ -30,10 +31,16 @@ export default function SettingsScreen() {
   const { colors, resolved } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const isOwner = member?.role === 'owner';
+  const caps = orgCapabilities(member?.role);
+  const isOwner = caps.isOwner;
   const [busy, setBusy] = useState(false);
   const [newOrgName, setNewOrgName] = useState('');
   const [creating, setCreating] = useState(false);
+
+  function goHomeAfterWorkspaceChange(message: string) {
+    toast.success(message);
+    router.replace('/(tabs)');
+  }
 
   if (loading) {
     return (
@@ -104,8 +111,25 @@ export default function SettingsScreen() {
           </Text>
           <Text style={{ color: colors.muted, fontSize: 14, marginTop: 4 }}>
             {user.email ?? user.uid}
-            {member?.role ? ` · ${member.role}` : ''}
           </Text>
+          {member?.role ? (
+            <Text
+              style={{
+                color: colors.accent,
+                fontSize: 13,
+                fontWeight: '700',
+                marginTop: 10,
+              }}>
+              {caps.workspaceRoleLabel}
+              {caps.isMember ? ' · invited workspace' : ' · your workspace'}
+            </Text>
+          ) : null}
+          {caps.isMember ? (
+            <Text style={{ color: colors.muted, fontSize: 13, marginTop: 8 }}>
+              As a member you can add fuel on assigned cards, request PIN, settle your balance, and
+              view your own reports.
+            </Text>
+          ) : null}
         </View>
 
         {workspaces.length > 1 ? (
@@ -116,13 +140,16 @@ export default function SettingsScreen() {
               options={workspaces.map((item) => ({
                 value: item.orgId,
                 label: item.orgName,
-                detail: item.role,
+                detail: item.role === 'owner' ? 'Owner' : 'Member',
               }))}
               onChange={(next) => {
+                if (next === orgId) {
+                  return;
+                }
                 setBusy(true);
                 void switchWorkspace(next)
                   .then(() => {
-                    toast.success('Workspace switched.');
+                    goHomeAfterWorkspaceChange('Workspace switched.');
                   })
                   .catch((err) => {
                     toast.error(err instanceof Error ? err.message : 'Could not switch');
@@ -151,6 +178,9 @@ export default function SettingsScreen() {
                   gap: 8,
                 }}>
                 <Text style={{ color: colors.ink, fontWeight: '600' }}>{invite.orgName}</Text>
+                <Text style={{ color: colors.muted, fontSize: 13 }}>
+                  Join as a member. You will see assigned cards, your fuel, and your balances.
+                </Text>
                 <AppButton
                   label={busy ? 'Joining…' : 'Accept invite'}
                   compact
@@ -159,7 +189,7 @@ export default function SettingsScreen() {
                     setBusy(true);
                     void joinInvite(invite.orgId, invite.inviteId)
                       .then(() => {
-                        toast.success(`Joined ${invite.orgName}.`);
+                        goHomeAfterWorkspaceChange(`Joined ${invite.orgName}.`);
                       })
                       .catch((err) => {
                         toast.error(err instanceof Error ? err.message : 'Could not join');
@@ -203,7 +233,7 @@ export default function SettingsScreen() {
                   .then(() => {
                     setCreating(false);
                     setNewOrgName('');
-                    toast.success('Workspace created.');
+                    goHomeAfterWorkspaceChange('Workspace created.');
                   })
                   .catch((err) => {
                     toast.error(err instanceof Error ? err.message : 'Could not create');

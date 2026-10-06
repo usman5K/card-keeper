@@ -17,6 +17,9 @@ import { writeAuditLog } from '@/features/audit/auditService';
 import { getFirestoreDb } from '@/firebase/firestore';
 import type { OrgInvite, OrgMember, Organization, UserProfile } from '@/types/org';
 import { normalizeEmail } from '@/utils/email';
+import { assertInviteEmailAvailable } from '@/utils/inviteGuard';
+
+export { assertInviteEmailAvailable } from '@/utils/inviteGuard';
 
 function dbOrThrow() {
   const db = getFirestoreDb();
@@ -208,15 +211,15 @@ export async function acceptInvite(user: User, orgId: string, inviteId: string) 
 
 export async function inviteMemberByEmail(orgId: string, invitedBy: string, email: string) {
   const db = dbOrThrow();
-  const normalized = normalizeEmail(email);
-  if (!normalized.includes('@')) {
-    throw new Error('Enter a valid email');
-  }
-
-  const org = await getOrganization(orgId);
+  const [org, members, invites] = await Promise.all([
+    getOrganization(orgId),
+    listActiveMembers(orgId),
+    listOrgInvites(orgId),
+  ]);
   if (!org) {
     throw new Error('Workspace not found');
   }
+  const normalized = assertInviteEmailAvailable(email, members, invites);
 
   const inviteRef = doc(collection(db, 'organizations', orgId, 'invites'));
   const invite: OrgInvite = {

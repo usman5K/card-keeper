@@ -257,7 +257,7 @@ export default function PersonDetailScreen() {
 
               <View className="mt-xl">
                 <Text className="text-sm font-medium uppercase tracking-wide text-muted">
-                  Card assignments
+                  {isOwner ? 'Card assignments' : 'Your cards'}
                 </Text>
                 {isOwner && person.role === 'member' ? (
                   cards.length === 0 ? (

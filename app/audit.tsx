@@ -120,22 +120,7 @@ export default function AuditScreen() {
   }
 
   if (!isOwner) {
-    return (
-      <View className="flex-1 bg-background px-md pt-lg" style={{ paddingTop: insets.top + 16 }}>
-        <Stack.Screen options={{ title: 'Audit log' }} />
-        <EmptyState
-          title="Owner only"
-          body="Audit history is available to the workspace owner."
-        />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-          className="mt-lg items-center rounded-lg bg-ink px-md py-md"
-          onPress={() => router.back()}>
-          <Text className="text-base font-semibold text-background">Back</Text>
-        </Pressable>
-      </View>
-    );
+    return <Redirect href="/(tabs)" />;
   }
 
   return (

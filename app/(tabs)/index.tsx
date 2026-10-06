@@ -26,12 +26,13 @@ import {
 } from '@/features/adjustments/adjustmentService';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { projectBalancesForCards } from '@/features/balance/balanceService';
-import { listVisibleCards } from '@/features/cards/cardService';
+import { listAllCards, listVisibleCards } from '@/features/cards/cardService';
 import {
   createFuelTransaction,
   listRecentFuelTransactions,
   type FuelTransactionDoc,
 } from '@/features/fuel/fuelService';
+import { orgCapabilities } from '@/features/org/capabilities';
 import { useOrg } from '@/features/org/OrgProvider';
 import { listActiveMembers, type OrgMemberDoc } from '@/features/org/orgService';
 import {
@@ -74,7 +75,8 @@ export default function HomeScreen() {
   const { isOnline, counts, balanceTrusted, refresh: refreshSync } = useSync();
   const { colors } = useTheme();
   const router = useRouter();
-  const isOwner = member?.role === 'owner';
+  const caps = orgCapabilities(member?.role);
+  const isOwner = caps.isOwner;
   const [txs, setTxs] = useState<FuelTransactionDoc[]>([]);
   const [cards, setCards] = useState<FuelCardDoc[]>([]);
   const [projectedByCard, setProjectedByCard] = useState<Record<string, number>>({});
@@ -82,6 +84,9 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetLoading, setSheetLoading] = useState(false);
+  const [fuelCards, setFuelCards] = useState<FuelCardDoc[]>([]);
+  const [fuelPeople, setFuelPeople] = useState<OrgMemberDoc[]>([]);
   const [amountText, setAmountText] = useState('');
   const [cardId, setCardId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -116,19 +121,21 @@ export default function HomeScreen() {
       void (async () => {
         try {
           const [nextCards, nextTxs, nextPeople, pinRows, pendingSettlements] = await Promise.all([
-            listVisibleCards(orgId, member),
+            isOwner ? listAllCards(orgId) : listVisibleCards(orgId, member),
             listRecentFuelTransactions(orgId, {
               userId: isOwner ? undefined : user.uid,
               max: FUEL_WINDOW,
             }),
-            isOwner ? listActiveMembers(orgId) : Promise.resolve([]),
+            isOwner ? listActiveMembers(orgId) : Promise.resolve([] as OrgMemberDoc[]),
             isOwner
               ? listPendingPinRequests(orgId)
               : listMyPinRequests(orgId, user.uid),
             isOwner ? listPendingSettlements(orgId) : Promise.resolve([]),
           ]);
 
-          const activeCards = nextCards.filter((card) => card.status === 'active');
+          const activeCards = nextCards
+            .filter((card) => card.status === 'active')
+            .sort((a, b) => a.name.localeCompare(b.name));
           const needsProjection = activeCards
             .filter((card) => card.serverBalanceSnapshot == null)
             .map((card) => card.id);
@@ -220,23 +227,64 @@ export default function HomeScreen() {
   const recentTxs = useMemo(() => txs.slice(0, RECENT_LIMIT), [txs]);
   const stationChips = recentChips(txs.map((item) => item.station));
   const areaChips = recentChips(txs.map((item) => item.area));
-  const selectedCard = cards.find((card) => card.id === cardId) ?? null;
+  const selectedCard =
+    fuelCards.find((card) => card.id === cardId) ??
+    cards.find((card) => card.id === cardId) ??
+    null;
   const heroCaption = balanceCaption({
     trusted: balanceIsTrusted,
     summary: balanceSummary,
     role: isOwner ? 'owner' : 'member',
   });
 
-  function openSheet() {
+  async function openSheet() {
+    if (!orgId || !member || !user || sheetLoading) {
+      return;
+    }
+
+    setSheetLoading(true);
     setAmountText('');
     setStation('');
     setArea('');
     setNotes('');
-    setUserId(user?.uid ?? null);
-    if (!cardId && cards[0]) {
-      setCardId(cards[0].id);
+
+    try {
+      const [nextCards, nextPeople] = await Promise.all([
+        isOwner ? listAllCards(orgId) : listVisibleCards(orgId, member),
+        isOwner ? listActiveMembers(orgId) : Promise.resolve([] as OrgMemberDoc[]),
+      ]);
+      const activeCards = nextCards
+        .filter((card) => card.status === 'active')
+        .sort((a, b) => a.name.localeCompare(b.name));
+      if (activeCards.length === 0) {
+        toast.info(
+          isOwner
+            ? 'Add a card before logging fuel.'
+            : 'Ask the owner to assign you a card before logging fuel.',
+        );
+        return;
+      }
+
+      const nextCardId =
+        cardId && activeCards.some((card) => card.id === cardId)
+          ? cardId
+          : activeCards[0].id;
+      const nextUserId = !isOwner
+        ? user.uid
+        : userId && nextPeople.some((person) => person.id === userId)
+          ? userId
+          : user.uid;
+
+      setFuelCards(activeCards);
+      setFuelPeople(isOwner ? nextPeople : []);
+      setCardId(nextCardId);
+      setUserId(nextUserId);
+      setSheetOpen(true);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not load fuel options');
+    } finally {
+      setSheetLoading(false);
     }
-    setSheetOpen(true);
   }
 
   function onPendingPress(action: PendingAction) {
@@ -325,6 +373,11 @@ export default function HomeScreen() {
           <Text className="text-sm font-medium uppercase tracking-wide text-muted">
             {orgName ?? 'Workspace'}
           </Text>
+          {caps.isMember ? (
+            <Text className="mt-xs text-sm text-muted">
+              Member view · fuel on assigned cards only
+            </Text>
+          ) : null}
 
           {loading ? (
             <View className="mt-md">
@@ -458,9 +511,10 @@ export default function HomeScreen() {
           </Pressable>
         ) : null}
         <AppButton
-          label="Add Fuel"
-          onPress={openSheet}
-          disabled={cards.length === 0 || loading}
+          label={sheetLoading ? 'Loading…' : 'Add Fuel'}
+          onPress={() => void openSheet()}
+          busy={sheetLoading}
+          disabled={cards.length === 0 || loading || sheetLoading}
         />
       </View>
 
@@ -503,6 +557,7 @@ export default function HomeScreen() {
             <AppButton
               label={busy ? 'Saving…' : isOnline ? 'Save' : 'Save offline'}
               busy={busy}
+              disabled={fuelCards.length === 0}
               onPress={() => void submitFuel()}
             />
           </SheetActions>
@@ -513,7 +568,7 @@ export default function HomeScreen() {
           <SelectField
             label="Card"
             value={cardId}
-            options={cards.map((card) => ({
+            options={fuelCards.map((card) => ({
               value: card.id,
               label: card.name,
               detail: `•••• ${card.last4}${card.issuer ? ` · ${card.issuer}` : ''}`,
@@ -528,7 +583,7 @@ export default function HomeScreen() {
             <SelectField
               label="Used by"
               value={userId}
-              options={people.map((person) => ({
+              options={fuelPeople.map((person) => ({
                 value: person.id,
                 label: person.displayName || person.email,
                 detail: person.email,

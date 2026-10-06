@@ -8,7 +8,14 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import {
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   FadeInUp,
@@ -64,66 +71,33 @@ export const toast = {
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [current, setCurrent] = useState<ToastItem | null>(null);
+  const currentRef = useRef<ToastItem | null>(null);
   const queueRef = useRef<ToastItem[]>([]);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const clearTimer = useCallback(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
+  const advance = useCallback(() => {
+    const next = queueRef.current.shift() ?? null;
+    currentRef.current = next;
+    setCurrent(next);
   }, []);
 
-  const presentNext = useCallback(() => {
-    const next = queueRef.current.shift() ?? null;
-    setCurrent(next);
-    clearTimer();
-    if (!next) {
+  const show = useCallback((input: ToastInput) => {
+    const message = input.message.trim();
+    if (!message) {
       return;
     }
-    timerRef.current = setTimeout(() => {
-      setCurrent(null);
-      timerRef.current = setTimeout(() => {
-        presentNext();
-      }, 160);
-    }, next.durationMs);
-  }, [clearTimer]);
-
-  const show = useCallback(
-    (input: ToastInput) => {
-      const message = input.message.trim();
-      if (!message) {
-        return;
-      }
-      const item: ToastItem = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        message,
-        tone: input.tone ?? 'info',
-        durationMs: input.durationMs ?? DEFAULT_DURATION,
-      };
-      if (current) {
-        queueRef.current.push(item);
-        return;
-      }
-      setCurrent(item);
-      clearTimer();
-      timerRef.current = setTimeout(() => {
-        setCurrent(null);
-        timerRef.current = setTimeout(() => {
-          presentNext();
-        }, 160);
-      }, item.durationMs);
-    },
-    [clearTimer, current, presentNext],
-  );
-
-  const dismiss = useCallback(() => {
-    clearTimer();
-    setCurrent(null);
-    timerRef.current = setTimeout(() => {
-      presentNext();
-    }, 120);
-  }, [clearTimer, presentNext]);
+    const item: ToastItem = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      message,
+      tone: input.tone ?? 'info',
+      durationMs: input.durationMs ?? DEFAULT_DURATION,
+    };
+    if (currentRef.current) {
+      queueRef.current.push(item);
+      return;
+    }
+    currentRef.current = item;
+    setCurrent(item);
+  }, []);
 
   useEffect(() => {
     externalShow = show;
@@ -131,9 +105,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       if (externalShow === show) {
         externalShow = null;
       }
-      clearTimer();
     };
-  }, [show, clearTimer]);
+  }, [show]);
+
+  useEffect(() => {
+    if (!current) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      advance();
+    }, current.durationMs);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [current, advance]);
 
   const value = useMemo<ToastContextValue>(
     () => ({
@@ -148,7 +133,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <ToastViewport item={current} onDismiss={dismiss} />
+      <ToastViewport item={current} onDismiss={advance} />
     </ToastContext.Provider>
   );
 }
@@ -184,79 +169,124 @@ function ToastViewport({
     width: `${Math.max(progress.value, 0) * 100}%`,
   }));
 
-  if (!item) {
-    return null;
-  }
-
   const backgroundColor =
-    item.tone === 'success'
+    item?.tone === 'success'
       ? colors.accentSoft
-      : item.tone === 'error'
+      : item?.tone === 'error'
         ? resolved === 'dark'
           ? '#3A1D1A'
           : '#FCEBEA'
         : colors.surface;
 
   const barColor =
-    item.tone === 'success'
+    item?.tone === 'success'
       ? colors.accent
-      : item.tone === 'error'
+      : item?.tone === 'error'
         ? colors.danger
         : colors.muted;
 
-  return (
-    <View
-      pointerEvents="box-none"
-      style={{
-        position: 'absolute',
-        left: 16,
-        right: 16,
-        top: Math.max(insets.top, 12) + 8,
-        zIndex: 1000,
-      }}>
-      <Animated.View entering={FadeInUp.duration(180)} exiting={FadeOutUp.duration(160)}>
-        <Pressable
-          accessibilityRole="alert"
-          accessibilityLiveRegion="polite"
-          onPress={onDismiss}
-          style={{
-            borderRadius: 14,
-            borderWidth: 1,
-            borderColor: colors.border,
-            backgroundColor,
-            paddingHorizontal: 14,
-            paddingTop: 12,
-            paddingBottom: 10,
-            shadowColor: '#000',
-            shadowOpacity: resolved === 'dark' ? 0.35 : 0.12,
-            shadowRadius: 10,
-            shadowOffset: { width: 0, height: 4 },
-            elevation: 4,
-          }}>
-          <Text style={{ color: colors.ink, fontSize: 15, fontWeight: '600' }}>
-            {item.message}
-          </Text>
-          <View
+  const banner =
+    item == null ? null : (
+      <View
+        pointerEvents="box-none"
+        style={[styles.bannerWrap, { top: Math.max(insets.top, 12) + 8 }]}>
+        <Animated.View
+          entering={FadeInUp.duration(180)}
+          exiting={FadeOutUp.duration(160)}
+          pointerEvents="auto">
+          <Pressable
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+            onPress={onDismiss}
             style={{
-              marginTop: 10,
-              height: 3,
-              borderRadius: 999,
-              backgroundColor: colors.border,
-              overflow: 'hidden',
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: colors.border,
+              backgroundColor,
+              paddingHorizontal: 14,
+              paddingTop: 12,
+              paddingBottom: 10,
+              shadowColor: '#000',
+              shadowOpacity: resolved === 'dark' ? 0.35 : 0.12,
+              shadowRadius: 10,
+              shadowOffset: { width: 0, height: 4 },
+              elevation: 8,
             }}>
-            <Animated.View
-              style={[
-                {
-                  height: 3,
-                  borderRadius: 999,
-                  backgroundColor: barColor,
-                },
-                barStyle,
-              ]}
-            />
-          </View>
-        </Pressable>
-      </Animated.View>
-    </View>
+            <Text style={{ color: colors.ink, fontSize: 15, fontWeight: '600' }}>
+              {item.message}
+            </Text>
+            <View
+              style={{
+                marginTop: 10,
+                height: 3,
+                borderRadius: 999,
+                backgroundColor: colors.border,
+                overflow: 'hidden',
+              }}>
+              <Animated.View
+                style={[
+                  {
+                    height: 3,
+                    borderRadius: 999,
+                    backgroundColor: barColor,
+                  },
+                  barStyle,
+                ]}
+              />
+            </View>
+          </Pressable>
+        </Animated.View>
+      </View>
+    );
+
+  if (Platform.OS === 'web' && typeof document !== 'undefined') {
+    if (!banner) {
+      return null;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const reactDom = require('react-dom') as {
+      createPortal: (node: ReactNode, container: Element) => ReactNode;
+    };
+    return reactDom.createPortal(
+      <View pointerEvents="box-none" style={styles.webRoot}>
+        {banner}
+      </View>,
+      document.body,
+    );
+  }
+
+  return (
+    <Modal
+      visible={item != null}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      presentationStyle="overFullScreen"
+      onRequestClose={onDismiss}>
+      <View style={styles.nativeRoot} pointerEvents="box-none">
+        {banner}
+      </View>
+    </Modal>
   );
 }
+
+const styles = StyleSheet.create({
+  bannerWrap: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 2,
+  },
+  webRoot: {
+    position: 'fixed' as unknown as 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 2147483000,
+    elevation: 2147483000,
+  },
+  nativeRoot: {
+    flex: 1,
+  },
+});

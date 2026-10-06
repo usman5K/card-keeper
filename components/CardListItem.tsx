@@ -63,7 +63,11 @@ export function CardListItem({
         }}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Edit ${card.name} ending ${card.last4}`}
+          accessibilityLabel={
+            isOwner
+              ? `Edit ${card.name} ending ${card.last4}`
+              : `Open ${card.name} ending ${card.last4}`
+          }
           style={({ pressed }) => ({
             flex: 1,
             paddingRight: 12,
@@ -118,9 +122,11 @@ export function CardListItem({
         </Pressable>
 
         <View style={{ gap: 8, paddingTop: 2 }}>
-          <IconButton label={`Edit ${card.name}`} onPress={onEdit} color={colors.border}>
-            <Pencil color={colors.ink} size={18} />
-          </IconButton>
+          {isOwner ? (
+            <IconButton label={`Edit ${card.name}`} onPress={onEdit} color={colors.border}>
+              <Pencil color={colors.ink} size={18} />
+            </IconButton>
+          ) : null}
           <IconButton label={`History for ${card.name}`} onPress={onHistory} color={colors.border}>
             <History color={colors.ink} size={18} />
           </IconButton>
