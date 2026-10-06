@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { ChevronDown } from 'lucide-react-native';
-import { vars } from 'nativewind';
 
 import { useTheme } from '@/features/theme/ThemeProvider';
-import { a11y, themeCssVars } from '@/theme/tokens';
+import { a11y } from '@/theme/tokens';
 
 export type SelectOption = {
   value: string;
@@ -20,6 +19,8 @@ type Props = {
   onChange: (value: string) => void;
 };
 
+const OPTIONS_MAX_HEIGHT = 220;
+
 export function SelectField({
   label,
   value,
@@ -33,93 +34,107 @@ export function SelectField({
 
   return (
     <View>
-      <Text className="text-sm font-medium uppercase tracking-wide text-muted">{label}</Text>
+      <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600', letterSpacing: 0.5 }}>
+        {label.toUpperCase()}
+      </Text>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${label}: ${selected?.label ?? placeholder}`}
-        className="mt-sm flex-row items-center justify-between rounded-xl border px-md"
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen((current) => !current)}
         style={{
+          marginTop: 8,
           minHeight: a11y.minHit,
+          borderRadius: 12,
+          borderWidth: 1,
           borderColor: colors.border,
           backgroundColor: colors.surface,
-        }}
-        onPress={() => setOpen(true)}>
-        <View className="flex-1 pr-sm">
+          paddingHorizontal: 14,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}>
+        <View style={{ flex: 1, paddingRight: 8 }}>
           <Text
-            className="text-base font-medium"
-            style={{ color: selected ? colors.ink : colors.muted }}
-            numberOfLines={1}>
+            numberOfLines={1}
+            style={{
+              color: selected ? colors.ink : colors.muted,
+              fontSize: 16,
+              fontWeight: '500',
+            }}>
             {selected?.label ?? placeholder}
           </Text>
           {selected?.detail ? (
-            <Text className="mt-xs text-sm" style={{ color: colors.muted }} numberOfLines={1}>
+            <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 13, marginTop: 2 }}>
               {selected.detail}
             </Text>
           ) : null}
         </View>
-        <ChevronDown color={colors.muted} size={18} />
+        <View style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}>
+          <ChevronDown color={colors.muted} size={18} />
+        </View>
       </Pressable>
 
-      <Modal visible={open} animationType="fade" transparent onRequestClose={() => setOpen(false)}>
-        <View style={[{ flex: 1 }, vars(themeCssVars(colors))]} className="flex-1 justify-end">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Dismiss options"
-            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' }}
-            onPress={() => setOpen(false)}
-          />
-          <View
-            style={{
-              maxHeight: '70%',
-              backgroundColor: colors.surface,
-              borderTopLeftRadius: 20,
-              borderTopRightRadius: 20,
-              borderTopWidth: 1,
-              borderColor: colors.border,
-              paddingBottom: 20,
-            }}>
-            <Text className="px-md pt-md text-base font-semibold text-ink">{label}</Text>
-            <ScrollView keyboardShouldPersistTaps="handled" className="mt-sm">
-              {options.map((option) => {
+      {open ? (
+        <View
+          style={{
+            marginTop: 8,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: colors.border,
+            backgroundColor: colors.surface,
+            overflow: 'hidden',
+            maxHeight: OPTIONS_MAX_HEIGHT,
+          }}>
+          {options.length === 0 ? (
+            <Text style={{ color: colors.muted, fontSize: 14, padding: 14 }}>
+              No options available
+            </Text>
+          ) : (
+            <ScrollView
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              style={{ maxHeight: OPTIONS_MAX_HEIGHT }}
+              bounces={options.length > 4}>
+              {options.map((option, index) => {
                 const isSelected = option.value === value;
                 return (
                   <Pressable
                     key={option.value}
                     accessibilityRole="button"
                     accessibilityState={{ selected: isSelected }}
-                    className="flex-row items-center justify-between px-md py-md"
-                    style={{
-                      minHeight: a11y.minHit,
-                      backgroundColor: isSelected ? colors.accentSoft : 'transparent',
-                      borderBottomWidth: 1,
-                      borderBottomColor: colors.border,
-                    }}
                     onPress={() => {
                       onChange(option.value);
                       setOpen(false);
+                    }}
+                    style={{
+                      minHeight: a11y.minHit,
+                      paddingHorizontal: 14,
+                      paddingVertical: 12,
+                      backgroundColor: isSelected ? colors.accentSoft : 'transparent',
+                      borderTopWidth: index === 0 ? 0 : 1,
+                      borderTopColor: colors.border,
                     }}>
-                    <View className="flex-1 pr-md">
-                      <Text
-                        className="text-base font-medium"
-                        style={{ color: isSelected ? colors.accent : colors.ink }}>
-                        {option.label}
+                    <Text
+                      style={{
+                        color: isSelected ? colors.accent : colors.ink,
+                        fontSize: 16,
+                        fontWeight: '500',
+                      }}>
+                      {option.label}
+                    </Text>
+                    {option.detail ? (
+                      <Text style={{ color: colors.muted, fontSize: 13, marginTop: 2 }}>
+                        {option.detail}
                       </Text>
-                      {option.detail ? (
-                        <Text className="mt-xs text-sm" style={{ color: colors.muted }}>
-                          {option.detail}
-                        </Text>
-                      ) : null}
-                    </View>
-                    {isSelected ? (
-                      <Text style={{ color: colors.accent, fontWeight: '700' }}>Selected</Text>
                     ) : null}
                   </Pressable>
                 );
               })}
             </ScrollView>
-          </View>
+          )}
         </View>
-      </Modal>
+      ) : null}
     </View>
   );
 }

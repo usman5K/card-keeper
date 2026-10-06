@@ -5,11 +5,14 @@ import {
   LineChart,
   Settings,
   Users,
+  Wallet,
 } from 'lucide-react-native';
 import { Pressable, View } from 'react-native';
 
 import { OfflineBanner } from '@/components/OfflineBanner';
 import { SyncBadge } from '@/components/SyncBadge';
+import { useOrg } from '@/features/org/OrgProvider';
+import { orgCapabilities } from '@/features/org/capabilities';
 import { useSync } from '@/features/sync/SyncProvider';
 import { useTheme } from '@/features/theme/ThemeProvider';
 import { a11y } from '@/theme/tokens';
@@ -45,11 +48,14 @@ function TabHeaderRight() {
 export default function TabLayout() {
   const { status } = useSync();
   const { colors } = useTheme();
+  const { orgId, member } = useOrg();
+  const caps = orgCapabilities(member?.role);
 
   return (
     <View className="flex-1 bg-background">
       <OfflineBanner visible={status === 'offline'} />
       <Tabs
+        key={orgId ?? 'no-org'}
         screenOptions={{
           tabBarActiveTintColor: colors.accent,
           tabBarInactiveTintColor: colors.muted,
@@ -87,9 +93,14 @@ export default function TabLayout() {
         <Tabs.Screen
           name="people"
           options={{
-            title: 'People',
-            tabBarAccessibilityLabel: 'People tab',
-            tabBarIcon: ({ color, size }) => <Users color={color} size={size} />,
+            title: caps.peopleTabTitle,
+            tabBarAccessibilityLabel: `${caps.peopleTabTitle} tab`,
+            tabBarIcon: ({ color, size }) =>
+              caps.isOwner ? (
+                <Users color={color} size={size} />
+              ) : (
+                <Wallet color={color} size={size} />
+              ),
           }}
         />
         <Tabs.Screen

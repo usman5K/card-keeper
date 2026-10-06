@@ -33,22 +33,13 @@ function asSyncStatus(value: unknown): SyncStatus {
   return 'SYNCED';
 }
 
-export async function projectBalancesForCards(
-  orgId: string,
-  cardIds: string[],
-): Promise<Record<string, number>> {
-  const ids = [...new Set(cardIds.filter(Boolean))];
-  if (ids.length === 0) {
-    return {};
-  }
-
-  const idSet = new Set(ids);
+async function ledgerEventsForCard(orgId: string, cardId: string) {
   const db = dbOrThrow();
-
   const [rechargeSnap, fuelSnap, adjustmentSnap] = await Promise.all([
     getDocs(
       query(
         collection(db, 'organizations', orgId, 'recharges'),
+        where('cardId', '==', cardId),
         orderBy('occurredAt', 'desc'),
         limit(LEDGER_WINDOW),
       ),
@@ -57,6 +48,7 @@ export async function projectBalancesForCards(
       query(
         collection(db, 'organizations', orgId, 'transactions'),
         where('type', '==', 'FUEL'),
+        where('cardId', '==', cardId),
         orderBy('occurredAt', 'desc'),
         limit(LEDGER_WINDOW),
       ),
@@ -64,24 +56,18 @@ export async function projectBalancesForCards(
     getDocs(
       query(
         collection(db, 'organizations', orgId, 'adjustments'),
+        where('cardId', '==', cardId),
         orderBy('occurredAt', 'desc'),
         limit(LEDGER_WINDOW),
       ),
     ),
   ]);
 
-  const eventsByCard = new Map<string, Parameters<typeof projectCardBalance>[0]>();
-
-  for (const id of ids) {
-    eventsByCard.set(id, []);
-  }
+  const events: Parameters<typeof projectCardBalance>[0] = [];
 
   for (const doc of rechargeSnap.docs) {
     const row = doc.data() as Recharge;
-    if (!idSet.has(row.cardId)) {
-      continue;
-    }
-    eventsByCard.get(row.cardId)?.push({
+    events.push({
       kind: 'RECHARGE',
       amount: row.amount,
     });
@@ -89,10 +75,7 @@ export async function projectBalancesForCards(
 
   for (const doc of fuelSnap.docs) {
     const row = doc.data() as FuelTransaction;
-    if (!idSet.has(row.cardId)) {
-      continue;
-    }
-    eventsByCard.get(row.cardId)?.push({
+    events.push({
       kind: 'FUEL',
       amount: row.amount,
       syncStatus: asSyncStatus(row.syncStatus),
@@ -102,19 +85,36 @@ export async function projectBalancesForCards(
 
   for (const doc of adjustmentSnap.docs) {
     const row = doc.data() as Adjustment;
-    if (!idSet.has(row.cardId)) {
-      continue;
-    }
-    eventsByCard.get(row.cardId)?.push({
+    events.push({
       kind: 'ADJUSTMENT',
       amount: row.amount,
       adjustmentKind: row.kind,
     });
   }
 
+  return events;
+}
+
+export async function projectBalancesForCards(
+  orgId: string,
+  cardIds: string[],
+): Promise<Record<string, number>> {
+  const ids = [...new Set(cardIds.filter(Boolean))];
+  if (ids.length === 0) {
+    return {};
+  }
+
+  // Per-card queries so member rules (assigned cards only) can authorize the lists.
+  const rows = await Promise.all(
+    ids.map(async (cardId) => {
+      const events = await ledgerEventsForCard(orgId, cardId);
+      return [cardId, projectCardBalance(events).balance] as const;
+    }),
+  );
+
   const out: Record<string, number> = {};
-  for (const id of ids) {
-    out[id] = projectCardBalance(eventsByCard.get(id) ?? []).balance;
+  for (const [cardId, balance] of rows) {
+    out[cardId] = balance;
   }
   return out;
 }

@@ -8,7 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { Redirect, Stack, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ConfirmSheet } from '@/components/ConfirmSheet';
@@ -167,23 +167,7 @@ export default function ConflictsScreen() {
   }
 
   if (!isOwner) {
-    return (
-      <View className="flex-1 bg-background px-md pt-lg">
-        <Stack.Screen options={{ title: 'Conflicts' }} />
-        <EmptyState
-          title="Owner only"
-          body="Only the workspace owner can review sync conflicts."
-        />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-          className="mt-lg items-center justify-center py-md"
-          style={{ minHeight: a11y.minHit }}
-          onPress={() => router.back()}>
-          <Text className="text-base text-muted">Go back</Text>
-        </Pressable>
-      </View>
-    );
+    return <Redirect href="/(tabs)" />;
   }
 
   return (

@@ -29,6 +29,7 @@ import {
   listVisibleCards,
   updateCard,
 } from '@/features/cards/cardService';
+import { orgCapabilities } from '@/features/org/capabilities';
 import { useOrg } from '@/features/org/OrgProvider';
 import { useTheme } from '@/features/theme/ThemeProvider';
 import { toast } from '@/features/toast/ToastProvider';
@@ -69,7 +70,8 @@ export default function CardsScreen() {
   const { user } = useAuth();
   const { ready: orgReady, orgId, member, refresh } = useOrg();
   const { colors } = useTheme();
-  const isOwner = member?.role === 'owner';
+  const caps = orgCapabilities(member?.role);
+  const isOwner = caps.isOwner;
   const [cards, setCards] = useState<FuelCardDoc[]>([]);
   const [balances, setBalances] = useState<Record<string, number>>({});
   const [openingCardIds, setOpeningCardIds] = useState<Set<string>>(new Set());
@@ -134,12 +136,23 @@ export default function CardsScreen() {
             return;
           }
           next.sort((a, b) => a.name.localeCompare(b.name));
+          setCards(next);
+          setError(null);
+
           const needsProjection = next
             .filter((card) => card.serverBalanceSnapshot == null)
             .map((card) => card.id);
+          const snapshotBalances: Record<string, number> = {};
+          for (const card of next) {
+            if (card.serverBalanceSnapshot != null) {
+              snapshotBalances[card.id] = card.serverBalanceSnapshot;
+            }
+          }
+          setBalances(snapshotBalances);
+
           const [projected, pinRows, openingIds] = await Promise.all([
             needsProjection.length > 0
-              ? projectBalancesForCards(orgId, needsProjection)
+              ? projectBalancesForCards(orgId, needsProjection).catch(() => ({} as Record<string, number>))
               : Promise.resolve({} as Record<string, number>),
             member.role === 'owner'
               ? listPendingPinRequests(orgId)
@@ -149,20 +162,17 @@ export default function CardsScreen() {
             listCardsWithOpening(
               orgId,
               next.map((card) => card.id),
-            ),
+            ).catch(() => new Set<string>()),
           ]);
           if (cancelled) {
             return;
           }
-          const nextBalances: Record<string, number> = {};
+          const nextBalances: Record<string, number> = { ...snapshotBalances };
           for (const card of next) {
-            if (card.serverBalanceSnapshot != null) {
-              nextBalances[card.id] = card.serverBalanceSnapshot;
-            } else if (projected[card.id] != null) {
+            if (nextBalances[card.id] == null && projected[card.id] != null) {
               nextBalances[card.id] = projected[card.id];
             }
           }
-          setCards(next);
           setBalances(nextBalances);
           setOpeningCardIds(openingIds);
           if (member.role === 'owner') {
@@ -172,7 +182,6 @@ export default function CardsScreen() {
             setMyPins(pinRows);
             setPendingPins([]);
           }
-          setError(null);
         } catch (err) {
           if (!cancelled) {
             setError(err instanceof Error ? err.message : 'Could not load cards');
@@ -639,7 +648,13 @@ export default function CardsScreen() {
                 isOwner={Boolean(isOwner)}
                 showOpening={isOwner && item.status === 'active' && !openingCardIds.has(item.id)}
                 pinAction={pinAction}
-                onPressCard={() => openEdit(item)}
+                onPressCard={() => {
+                  if (isOwner) {
+                    openEdit(item);
+                    return;
+                  }
+                  openHistory(item);
+                }}
                 onEdit={() => openEdit(item)}
                 onHistory={() => openHistory(item)}
                 onAddRecharge={

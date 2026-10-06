@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ReportsSkeleton } from '@/components/ReportsSkeleton';
 import { SelectField } from '@/components/SelectField';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { orgCapabilities } from '@/features/org/capabilities';
 import { useOrg } from '@/features/org/OrgProvider';
 import { exportCsvFile } from '@/features/reports/exportCsv';
 import {
@@ -38,24 +39,18 @@ import {
   type NameLookup,
 } from '@/utils/reports';
 
-const GROUP_KINDS: ReportGroupKind[] = [
-  'person',
-  'card',
-  'area',
-  'station',
-  'time',
-];
-
 export default function ReportsScreen() {
   const { colors } = useTheme();
   const { user } = useAuth();
   const { orgId, orgName, member } = useOrg();
   const { balanceTrusted, isOnline } = useSync();
   const insets = useSafeAreaInsets();
-  const isOwner = member?.role === 'owner';
+  const caps = orgCapabilities(member?.role);
+  const isOwner = caps.isOwner;
+  const groupKinds = caps.reportGroupKinds;
 
   const [period, setPeriod] = useState<ReportPeriod>('this_month');
-  const [groupKind, setGroupKind] = useState<ReportGroupKind>('person');
+  const [groupKind, setGroupKind] = useState<ReportGroupKind>(caps.defaultReportGroup);
   const [fuel, setFuel] = useState<ReportFuelRow[]>([]);
   const [settlements, setSettlements] = useState<ReportSettlementRow[]>([]);
   const [personNames, setPersonNames] = useState<NameLookup>({});
@@ -115,6 +110,10 @@ export default function ReportsScreen() {
       clearTimeout(timer);
     };
   }, [load, reloadKey]);
+
+  useEffect(() => {
+    setGroupKind(caps.defaultReportGroup);
+  }, [orgId, caps.defaultReportGroup]);
 
   const range = useMemo(() => resolveReportRange(period), [period]);
   const overview = useMemo(
@@ -186,9 +185,12 @@ export default function ReportsScreen() {
         paddingBottom: insets.bottom + 32,
       }}>
       <Text className="text-sm text-muted">{orgName ?? 'Workspace'}</Text>
-      <Text className="mt-xs text-xl font-semibold text-ink">
-        {isOwner ? 'Org spend' : 'Your spend'}
-      </Text>
+      <Text className="mt-xs text-xl font-semibold text-ink">{caps.reportsTitle}</Text>
+      {!isOwner ? (
+        <Text className="mt-xs text-sm text-muted">
+          Only your fuel and payments in this workspace.
+        </Text>
+      ) : null}
 
       {loading ? <ReportsSkeleton /> : null}
 
@@ -247,10 +249,10 @@ export default function ReportsScreen() {
           <View className="mt-xl">
             <Text className="mb-sm text-sm font-medium text-muted">Group by</Text>
             <ChipRow
-              options={GROUP_KINDS.map((kind) => groupKindLabel(kind))}
+              options={groupKinds.map((kind) => groupKindLabel(kind))}
               selected={groupKindLabel(groupKind)}
               onSelect={(label) => {
-                const next = GROUP_KINDS.find((kind) => groupKindLabel(kind) === label);
+                const next = groupKinds.find((kind) => groupKindLabel(kind) === label);
                 if (next) {
                   setGroupKind(next);
                 }
