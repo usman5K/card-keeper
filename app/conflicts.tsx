@@ -38,7 +38,7 @@ type PendingConfirm = {
 export default function ConflictsScreen() {
   const { colors } = useTheme();
   const { user } = useAuth();
-  const { orgId, member } = useOrg();
+  const { orgId, member, ready: orgReady } = useOrg();
   const { refresh: refreshSync } = useSync();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -164,6 +164,15 @@ export default function ConflictsScreen() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (!orgReady) {
+    return (
+      <View className="flex-1 items-center justify-center bg-background">
+        <Stack.Screen options={{ title: 'Conflict review' }} />
+        <ActivityIndicator color={colors.accent} />
+      </View>
+    );
   }
 
   if (!isOwner) {

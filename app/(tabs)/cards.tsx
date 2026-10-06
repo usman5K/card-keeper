@@ -7,6 +7,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+
 import { AmountField } from '@/components/AmountField';
 import { AppButton } from '@/components/AppButton';
 import { BottomSheet } from '@/components/BottomSheet';
@@ -52,6 +54,7 @@ import {
 } from '@/features/recharges/rechargeService';
 import { a11y } from '@/theme/tokens';
 import type { FuelCardDoc } from '@/types/card';
+import { friendlyFirestoreMessage } from '@/utils/firestoreErrors';
 import { formatPkr, parsePkrInput } from '@/utils/money';
 
 type TimelineItem =
@@ -68,7 +71,7 @@ type PendingConfirm = {
 
 export default function CardsScreen() {
   const { user } = useAuth();
-  const { ready: orgReady, orgId, member, refresh } = useOrg();
+  const { ready: orgReady, orgId, member, refresh, refreshMembership } = useOrg();
   const { colors } = useTheme();
   const caps = orgCapabilities(member?.role);
   const isOwner = caps.isOwner;
@@ -162,7 +165,7 @@ export default function CardsScreen() {
             listCardsWithOpening(
               orgId,
               next.map((card) => card.id),
-            ).catch(() => new Set<string>()),
+            ),
           ]);
           if (cancelled) {
             return;
@@ -184,7 +187,7 @@ export default function CardsScreen() {
           }
         } catch (err) {
           if (!cancelled) {
-            setError(err instanceof Error ? err.message : 'Could not load cards');
+            setError(friendlyFirestoreMessage(err, 'Could not load cards'));
           }
         } finally {
           if (!cancelled) {
@@ -199,6 +202,15 @@ export default function CardsScreen() {
       clearTimeout(timer);
     };
   }, [orgReady, orgId, member, reloadKey, user]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!orgReady || !orgId) {
+        return;
+      }
+      void refreshMembership();
+    }, [orgReady, orgId, refreshMembership]),
+  );
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -640,13 +652,19 @@ export default function CardsScreen() {
               };
             }
 
+            const needsOpening =
+              isOwner &&
+              item.status === 'active' &&
+              !openingCardIds.has(item.id) &&
+              (balance == null || balance <= 0);
+
             return (
               <CardListItem
                 card={item}
                 balance={balance}
                 balanceEstimated={balanceEstimated}
                 isOwner={Boolean(isOwner)}
-                showOpening={isOwner && item.status === 'active' && !openingCardIds.has(item.id)}
+                showOpening={needsOpening}
                 pinAction={pinAction}
                 onPressCard={() => {
                   if (isOwner) {
@@ -662,11 +680,7 @@ export default function CardsScreen() {
                     ? () => openRecharge(item)
                     : undefined
                 }
-                onAddOpening={
-                  isOwner && item.status === 'active' && !openingCardIds.has(item.id)
-                    ? () => openOpening(item)
-                    : undefined
-                }
+                onAddOpening={needsOpening ? () => openOpening(item) : undefined}
               />
             );
           }}

@@ -108,12 +108,16 @@ export function CardListItem({
               style={{ color: colors.ink, fontSize: 28, fontWeight: '700', marginTop: 4 }}
               accessibilityLabel={
                 balance == null
-                  ? 'Balance unknown'
+                  ? 'Balance unavailable'
                   : `Balance ${formatPkr(balance)}${balanceEstimated ? ', estimated' : ''}`
               }>
               {balance == null ? 'Rs —' : formatPkr(balance)}
             </Text>
-            {balanceEstimated && balance != null ? (
+            {balance == null ? (
+              <Text style={{ color: colors.offline, fontSize: 12, marginTop: 4 }}>
+                Balance unavailable · pull to refresh later
+              </Text>
+            ) : balanceEstimated ? (
               <Text style={{ color: colors.offline, fontSize: 12, marginTop: 4 }}>
                 Estimated from ledger
               </Text>

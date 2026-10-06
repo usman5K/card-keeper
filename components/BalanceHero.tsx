@@ -9,6 +9,7 @@ type Props = {
   label?: string;
   caption?: string;
   loading?: boolean;
+  awaitingSync?: boolean;
 };
 
 export function BalanceHero({
@@ -17,8 +18,10 @@ export function BalanceHero({
   label = 'Available balance',
   caption,
   loading = false,
+  awaitingSync = false,
 }: Props) {
   const { colors } = useTheme();
+  const showSyncWarning = !trusted && awaitingSync && amount != null && !loading;
 
   return (
     <View className="rounded-2xl border border-border bg-surface px-md py-lg">
@@ -40,7 +43,7 @@ export function BalanceHero({
         </Text>
       )}
       {caption ? <Text className="mt-sm text-base text-muted">{caption}</Text> : null}
-      {!trusted && amount != null && !loading ? (
+      {showSyncWarning ? (
         <Text className="mt-xs text-sm" style={{ color: colors.offline }}>
           Not final until server sync
         </Text>

@@ -156,8 +156,13 @@ export async function listCardsWithOpening(
   const ids = new Set<string>();
   await Promise.all(
     cardIds.map(async (cardId) => {
-      const rows = await listAdjustmentsForCard(orgId, cardId, 40);
-      if (rows.some((row) => row.kind === 'OPENING')) {
+      try {
+        const rows = await listAdjustmentsForCard(orgId, cardId, 40);
+        if (rows.some((row) => row.kind === 'OPENING')) {
+          ids.add(cardId);
+        }
+      } catch {
+        // Unknown: hide Opening CTA rather than offering a duplicate seed.
         ids.add(cardId);
       }
     }),

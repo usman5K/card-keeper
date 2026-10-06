@@ -1,4 +1,11 @@
-import { endOfDay, isSameCalendarDay, toDate, toMonthKey, startOfDay } from '@/utils/dates';
+import {
+  coerceDate,
+  endOfDay,
+  isSameCalendarDay,
+  toDate,
+  toMonthKey,
+  startOfDay,
+} from '@/utils/dates';
 
 describe('dates', () => {
   it('builds month keys and day bounds', () => {
@@ -13,5 +20,12 @@ describe('dates', () => {
   it('parses iso strings and rejects invalid values', () => {
     expect(toDate('2026-10-05T12:00:00.000Z').toISOString()).toBe('2026-10-05T12:00:00.000Z');
     expect(() => toDate('not-a-date')).toThrow(/Invalid date/);
+  });
+
+  it('coerces Firestore-like timestamps', () => {
+    const date = new Date(2026, 9, 6, 9, 0, 0);
+    expect(coerceDate({ toDate: () => date })).toEqual(date);
+    expect(coerceDate(null)).toBeNull();
+    expect(coerceDate('not-a-date')).toBeNull();
   });
 });

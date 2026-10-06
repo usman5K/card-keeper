@@ -6,6 +6,35 @@ export function toDate(value: Date | string | number): Date {
   return date;
 }
 
+export function coerceDate(value: unknown): Date | null {
+  if (value == null) {
+    return null;
+  }
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (
+    typeof value === 'object' &&
+    'toDate' in value &&
+    typeof (value as { toDate: unknown }).toDate === 'function'
+  ) {
+    try {
+      const date = (value as { toDate: () => Date }).toDate();
+      return Number.isNaN(date.getTime()) ? null : date;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === 'number' || typeof value === 'string') {
+    try {
+      return toDate(value);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export function startOfDay(value: Date | string | number): Date {
   const date = toDate(value);
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());

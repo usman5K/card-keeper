@@ -44,28 +44,62 @@ export async function writeAuditLog(orgId: string, input: WriteAuditInput) {
     createdAt: serverTimestamp(),
   };
   const ref = doc(collection(dbOrThrow(), 'organizations', orgId, 'auditLogs'));
-  await setDoc(ref, body);
-  safeLog('audit', {
-    orgId,
-    action: input.action,
-    entityType: input.entityType,
-    entityId: input.entityId,
-    actorId: input.actorId,
-    metadata,
-  });
+  try {
+    await setDoc(ref, body);
+    safeLog('audit', {
+      orgId,
+      action: input.action,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      actorId: input.actorId,
+      metadata,
+    });
+  } catch (err) {
+    // Never fail the financial write because audit logging failed.
+    safeLog('audit_failed', {
+      orgId,
+      action: input.action,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      actorId: input.actorId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
   return { id: ref.id, ...body };
 }
 
 export async function listAuditLogs(orgId: string, max = 80): Promise<AuditLogDoc[]> {
-  const snap = await getDocs(
-    query(
-      collection(dbOrThrow(), 'organizations', orgId, 'auditLogs'),
-      orderBy('createdAt', 'desc'),
-      limit(max),
-    ),
-  );
-  return snap.docs.map((item) => ({
-    id: item.id,
-    ...(item.data() as AuditLog),
-  }));
+  try {
+    const snap = await getDocs(
+      query(
+        collection(dbOrThrow(), 'organizations', orgId, 'auditLogs'),
+        orderBy('createdAt', 'desc'),
+        limit(max),
+      ),
+    );
+    return snap.docs.map((item) => ({
+      id: item.id,
+      ...(item.data() as AuditLog),
+    }));
+  } catch {
+    const snap = await getDocs(
+      query(collection(dbOrThrow(), 'organizations', orgId, 'auditLogs'), limit(max)),
+    );
+    return snap.docs
+      .map((item) => ({
+        id: item.id,
+        ...(item.data() as AuditLog),
+      }))
+      .sort((a, b) => {
+        const left =
+          a.createdAt && typeof a.createdAt === 'object' && 'toMillis' in a.createdAt
+            ? (a.createdAt as { toMillis: () => number }).toMillis()
+            : 0;
+        const right =
+          b.createdAt && typeof b.createdAt === 'object' && 'toMillis' in b.createdAt
+            ? (b.createdAt as { toMillis: () => number }).toMillis()
+            : 0;
+        return right - left;
+      });
+  }
 }

@@ -40,6 +40,7 @@ type OrgContextValue = {
   workspaces: WorkspaceMembership[];
   error: string | null;
   refresh: () => Promise<void>;
+  refreshMembership: () => Promise<void>;
   createWorkspace: (name: string) => Promise<void>;
   joinInvite: (orgId: string, inviteId: string) => Promise<void>;
   inviteEmail: (email: string) => Promise<void>;
@@ -59,6 +60,20 @@ export function OrgProvider({ children }: PropsWithChildren) {
   const [workspaces, setWorkspaces] = useState<WorkspaceMembership[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  const refreshMembership = useCallback(async () => {
+    if (!user || !orgId || !isFirebaseConfigured()) {
+      return;
+    }
+    try {
+      const membership = await getActiveMembership(user.uid, orgId);
+      if (membership) {
+        setMember(membership);
+      }
+    } catch {
+      // Keep last-known membership; focus refresh is best-effort.
+    }
+  }, [user, orgId]);
+
   const refresh = useCallback(async () => {
     if (!user || !isFirebaseConfigured()) {
       setProfile(null);
@@ -71,7 +86,6 @@ export function OrgProvider({ children }: PropsWithChildren) {
       return;
     }
 
-    setReady(false);
     setError(null);
     try {
       const nextProfile = await ensureUserProfile(user);
@@ -141,6 +155,7 @@ export function OrgProvider({ children }: PropsWithChildren) {
       workspaces,
       error,
       refresh,
+      refreshMembership,
       createWorkspace: async (name: string) => {
         if (!user) {
           throw new Error('Not signed in');
@@ -183,6 +198,7 @@ export function OrgProvider({ children }: PropsWithChildren) {
       workspaces,
       error,
       refresh,
+      refreshMembership,
       user,
     ],
   );
