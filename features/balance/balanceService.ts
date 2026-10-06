@@ -105,16 +105,23 @@ export async function projectBalancesForCards(
   }
 
   // Per-card queries so member rules (assigned cards only) can authorize the lists.
+  // One card failing (index/permission) must not wipe the whole Home/Cards load.
   const rows = await Promise.all(
     ids.map(async (cardId) => {
-      const events = await ledgerEventsForCard(orgId, cardId);
-      return [cardId, projectCardBalance(events).balance] as const;
+      try {
+        const events = await ledgerEventsForCard(orgId, cardId);
+        return [cardId, projectCardBalance(events).balance] as const;
+      } catch {
+        return [cardId, null] as const;
+      }
     }),
   );
 
   const out: Record<string, number> = {};
   for (const [cardId, balance] of rows) {
-    out[cardId] = balance;
+    if (balance != null) {
+      out[cardId] = balance;
+    }
   }
   return out;
 }

@@ -1,4 +1,4 @@
-import { endOfDay, startOfDay, toDate, toMonthKey } from '@/utils/dates';
+import { coerceDate, endOfDay, startOfDay, toMonthKey } from '@/utils/dates';
 import { projectOutstanding } from '@/utils/balance';
 import { addPkr, assertIntegerPkr, sumPkr } from '@/utils/money';
 
@@ -100,29 +100,7 @@ export function resolveReportRange(period: ReportPeriod, now = new Date()): Repo
 }
 
 export function occurredAtDate(value: unknown): Date | null {
-  if (value == null) {
-    return null;
-  }
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value;
-  }
-  if (
-    typeof value === 'object'
-    && 'toDate' in value
-    && typeof (value as { toDate: unknown }).toDate === 'function'
-  ) {
-    try {
-      const date = (value as { toDate: () => Date }).toDate();
-      return Number.isNaN(date.getTime()) ? null : date;
-    } catch {
-      return null;
-    }
-  }
-  try {
-    return toDate(value as string | number);
-  } catch {
-    return null;
-  }
+  return coerceDate(value);
 }
 
 export function inReportRange(value: unknown, range: ReportDateRange) {

@@ -64,7 +64,7 @@ function metaSummary(item: AuditLogDoc) {
 export default function AuditScreen() {
   const { colors } = useTheme();
   const { user, loading: authLoading } = useAuth();
-  const { orgId, member } = useOrg();
+  const { orgId, member, ready: orgReady } = useOrg();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const isOwner = member?.role === 'owner';
@@ -107,7 +107,7 @@ export default function AuditScreen() {
     };
   }, [orgId, isOwner]);
 
-  if (authLoading) {
+  if (authLoading || !orgReady) {
     return (
       <View className="flex-1 items-center justify-center bg-background">
         <ActivityIndicator color={colors.accent} />

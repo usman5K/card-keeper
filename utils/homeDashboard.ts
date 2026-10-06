@@ -1,4 +1,4 @@
-import { toMonthKey } from '@/utils/dates';
+import { coerceDate, toMonthKey } from '@/utils/dates';
 import { addPkr, assertIntegerPkr, sumPkr } from '@/utils/money';
 
 export type CardBalanceInput = {
@@ -70,11 +70,12 @@ export function sumAvailableBalance(cards: CardBalanceInput[]): AvailableBalance
 }
 
 export function occurredAtMonthKey(value: unknown): string | null {
-  if (value == null) {
+  const date = coerceDate(value);
+  if (!date) {
     return null;
   }
   try {
-    return toMonthKey(String(value));
+    return toMonthKey(date);
   } catch {
     return null;
   }

@@ -62,6 +62,7 @@ describe('homeDashboard aggregates', () => {
   it('reads month key from occurredAt', () => {
     const local = new Date(2026, 9, 5, 12, 0, 0);
     expect(occurredAtMonthKey(local.toISOString())).toBe(toMonthKey(local));
+    expect(occurredAtMonthKey({ toDate: () => local })).toBe(toMonthKey(local));
     expect(occurredAtMonthKey(null)).toBeNull();
     expect(occurredAtMonthKey('not-a-date')).toBeNull();
   });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -6,7 +6,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AmountField } from '@/components/AmountField';
 import { AppButton } from '@/components/AppButton';
@@ -56,10 +56,28 @@ import {
   sumAvailableBalance,
   type PendingAction,
 } from '@/utils/homeDashboard';
+import { coerceDate } from '@/utils/dates';
+import { friendlyFirestoreMessage } from '@/utils/firestoreErrors';
 import { parsePkrInput, formatPkr, addPkr } from '@/utils/money';
 
 const RECENT_LIMIT = 8;
 const FUEL_WINDOW = 100;
+
+function sortFuelNewestFirst(rows: FuelTransactionDoc[]) {
+  return [...rows].sort((a, b) => {
+    const left = coerceDate(a.occurredAt)?.getTime() ?? 0;
+    const right = coerceDate(b.occurredAt)?.getTime() ?? 0;
+    return right - left;
+  });
+}
+
+function canSubmitFuelAmount(raw: string) {
+  try {
+    return parsePkrInput(raw) > 0;
+  } catch {
+    return false;
+  }
+}
 
 type PendingConfirm = {
   title: string;
@@ -71,8 +89,9 @@ type PendingConfirm = {
 
 export default function HomeScreen() {
   const { user } = useAuth();
-  const { orgId, orgName, member } = useOrg();
-  const { isOnline, counts, balanceTrusted, refresh: refreshSync } = useSync();
+  const { orgId, orgName, member, ready: orgReady, refreshMembership } = useOrg();
+  const { isOnline, counts, balanceTrusted, status: syncStatus, refresh: refreshSync } =
+    useSync();
   const { colors } = useTheme();
   const router = useRouter();
   const caps = orgCapabilities(member?.role);
@@ -83,6 +102,7 @@ export default function HomeScreen() {
   const [people, setPeople] = useState<OrgMemberDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [balanceHint, setBalanceHint] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetLoading, setSheetLoading] = useState(false);
   const [fuelCards, setFuelCards] = useState<FuelCardDoc[]>([]);
@@ -102,6 +122,10 @@ export default function HomeScreen() {
   const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
 
   useEffect(() => {
+    if (!orgReady) {
+      return;
+    }
+
     if (!orgId || !member || !user) {
       const timer = setTimeout(() => {
         setTxs([]);
@@ -111,6 +135,8 @@ export default function HomeScreen() {
         setOutstandingTotal(0);
         setPendingPinCount(0);
         setPendingSettlementCount(0);
+        setBalanceHint(null);
+        setError(null);
         setLoading(false);
       }, 0);
       return () => clearTimeout(timer);
@@ -119,6 +145,7 @@ export default function HomeScreen() {
     let cancelled = false;
     const timer = setTimeout(() => {
       void (async () => {
+        setLoading(true);
         try {
           const [nextCards, nextTxs, nextPeople, pinRows, pendingSettlements] = await Promise.all([
             isOwner ? listAllCards(orgId) : listVisibleCards(orgId, member),
@@ -136,17 +163,46 @@ export default function HomeScreen() {
           const activeCards = nextCards
             .filter((card) => card.status === 'active')
             .sort((a, b) => a.name.localeCompare(b.name));
+          const sortedTxs = sortFuelNewestFirst(nextTxs);
+
+          if (cancelled) {
+            return;
+          }
+
+          // Keep Home usable even if balance projection / outstanding fails.
+          setCards(activeCards);
+          setTxs(sortedTxs);
+          setPeople(nextPeople);
+          setPendingPinCount(
+            isOwner
+              ? pinRows.length
+              : pinRows.filter((item) => item.status === 'pending').length,
+          );
+          setPendingSettlementCount(pendingSettlements.length);
+          setError(null);
+          setCardId((current) => current ?? activeCards[0]?.id ?? null);
+          setUserId((current) => current ?? user.uid);
+          setLoading(false);
+
           const needsProjection = activeCards
             .filter((card) => card.serverBalanceSnapshot == null)
             .map((card) => card.id);
-          const [outstandingRows, reversed, projected] = await Promise.all([
-            isOwner
+          const [outstandingRows, reversed, projectedResult] = await Promise.all([
+            (isOwner
               ? Promise.all(nextPeople.map((person) => getPersonOutstanding(orgId, person.id)))
-              : getPersonOutstanding(orgId, user.uid).then((mine) => [mine]),
-            isOwner ? listReversalLinkedIds(orgId) : Promise.resolve(new Set<string>()),
+              : getPersonOutstanding(orgId, user.uid).then((mine) => [mine])
+            ).catch(() => [] as Awaited<ReturnType<typeof getPersonOutstanding>>[]),
+            isOwner
+              ? listReversalLinkedIds(orgId).catch(() => new Set<string>())
+              : Promise.resolve(new Set<string>()),
             needsProjection.length > 0
               ? projectBalancesForCards(orgId, needsProjection)
-              : Promise.resolve({} as Record<string, number>),
+                  .then((projected) => ({ projected, hint: null as string | null }))
+                  .catch((err) => ({
+                    projected: {} as Record<string, number>,
+                    hint: friendlyFirestoreMessage(err, 'Balance updating…'),
+                  }))
+              : Promise.resolve({ projected: {} as Record<string, number>, hint: null }),
           ]);
           const outstanding = outstandingRows.reduce(
             (total, row) => addPkr(total, row.outstanding),
@@ -157,27 +213,13 @@ export default function HomeScreen() {
             return;
           }
 
-          setCards(activeCards);
-          setProjectedByCard(projected);
-          setTxs(nextTxs);
-          setPeople(nextPeople);
+          setProjectedByCard(projectedResult.projected);
+          setBalanceHint(projectedResult.hint);
           setOutstandingTotal(outstanding);
-          setPendingPinCount(
-            isOwner
-              ? pinRows.length
-              : pinRows.filter((item) => item.status === 'pending').length,
-          );
-          setPendingSettlementCount(pendingSettlements.length);
           setReversedIds(reversed);
-          setError(null);
-          setCardId((current) => current ?? activeCards[0]?.id ?? null);
-          setUserId((current) => current ?? user.uid);
         } catch (err) {
           if (!cancelled) {
-            setError(err instanceof Error ? err.message : 'Could not load home');
-          }
-        } finally {
-          if (!cancelled) {
+            setError(friendlyFirestoreMessage(err, 'Could not load home'));
             setLoading(false);
           }
         }
@@ -188,7 +230,16 @@ export default function HomeScreen() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [orgId, member, user, isOwner, reloadKey]);
+  }, [orgReady, orgId, member, user, isOwner, reloadKey]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!orgReady || !orgId) {
+        return;
+      }
+      void refreshMembership();
+    }, [orgReady, orgId, refreshMembership]),
+  );
 
   const balanceSummary = useMemo(
     () =>
@@ -205,6 +256,12 @@ export default function HomeScreen() {
     balanceTrusted &&
     balanceSummary.projectedCount === 0 &&
     balanceSummary.unknownCount === 0;
+  const awaitingSync =
+    !isOnline ||
+    syncStatus === 'syncing' ||
+    syncStatus === 'pending' ||
+    syncStatus === 'conflict' ||
+    syncStatus === 'failed';
   const month = useMemo(
     () =>
       buildMonthSnapshot({
@@ -400,10 +457,16 @@ export default function HomeScreen() {
             </View>
           ) : (
             <>
+              {error || balanceHint ? (
+                <Text className="mt-sm text-sm" style={{ color: colors.offline }}>
+                  {balanceHint ?? error}
+                </Text>
+              ) : null}
               <View className="mt-md">
                 <BalanceHero
                   amount={balanceSummary.total}
                   trusted={balanceIsTrusted}
+                  awaitingSync={awaitingSync}
                   caption={heroCaption}
                 />
               </View>
@@ -514,7 +577,7 @@ export default function HomeScreen() {
           label={sheetLoading ? 'Loading…' : 'Add Fuel'}
           onPress={() => void openSheet()}
           busy={sheetLoading}
-          disabled={cards.length === 0 || loading || sheetLoading}
+          disabled={sheetLoading || (!loading && cards.length === 0)}
         />
       </View>
 
@@ -557,7 +620,14 @@ export default function HomeScreen() {
             <AppButton
               label={busy ? 'Saving…' : isOnline ? 'Save' : 'Save offline'}
               busy={busy}
-              disabled={fuelCards.length === 0}
+              disabled={
+                fuelCards.length === 0 ||
+                !cardId ||
+                !userId ||
+                !station.trim() ||
+                !area.trim() ||
+                !canSubmitFuelAmount(amountText)
+              }
               onPress={() => void submitFuel()}
             />
           </SheetActions>

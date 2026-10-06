@@ -530,7 +530,7 @@ export default function PeopleScreen() {
               body={
                 filter === 'Invited'
                   ? 'Send an invite above to add someone.'
-                  : 'Invite someone to share this ledger.'
+                  : 'Invite someone to share this ledger. Open a member to assign cards and record payments.'
               }
             />
           ) : null}
