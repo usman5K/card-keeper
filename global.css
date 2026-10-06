@@ -1,3 +1,16 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --color-background: #f7f6f2;
+  --color-surface: #ffffff;
+  --color-ink: #1a1f1c;
+  --color-muted: #6b7280;
+  --color-accent: #0f6b4c;
+  --color-accent-soft: #e6f2ec;
+  --color-danger: #b42318;
+  --color-border: #e5e2da;
+  --color-online: #0f6b4c;
+  --color-offline: #9a6700;
+}

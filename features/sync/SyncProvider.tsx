@@ -15,6 +15,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  updateDoc,
   where,
 } from 'firebase/firestore';
 
@@ -91,6 +92,17 @@ export function SyncProvider({ children }: PropsWithChildren) {
         const pendingWrites = snap.metadata.hasPendingWrites;
         setIsSyncing(pendingWrites);
 
+        // Without Cloud Functions, mark ack'd fuel as SYNCED once Firestore
+        // has no local pending writes for this query.
+        if (!pendingWrites && isOnline) {
+          for (const item of snap.docs) {
+            const data = item.data() as FuelTransaction;
+            if (data.syncStatus === 'PENDING' && !data.requiresReview) {
+              void updateDoc(item.ref, { syncStatus: 'SYNCED' }).catch(() => undefined);
+            }
+          }
+        }
+
         if (wasSyncing.current && !pendingWrites) {
           setRecentlySynced(true);
           if (syncedTimer.current) {
@@ -114,7 +126,7 @@ export function SyncProvider({ children }: PropsWithChildren) {
         clearTimeout(syncedTimer.current);
       }
     };
-  }, [orgId, tick]);
+  }, [orgId, tick, isOnline]);
 
   const refresh = useCallback(() => {
     setTick((value) => value + 1);

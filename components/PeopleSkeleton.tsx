@@ -1,15 +1,17 @@
 import { View } from 'react-native';
 
-import { colors } from '@/theme/tokens';
+import { useTheme } from '@/features/theme/ThemeProvider';
 
 function Bar({
   height,
   width,
   className,
+  color,
 }: {
   height: number;
   width?: number | `${number}%`;
   className?: string;
+  color: string;
 }) {
   return (
     <View
@@ -17,23 +19,24 @@ function Bar({
       style={{
         height,
         width: width ?? '100%',
-        backgroundColor: colors.border,
-        borderRadius: 8,
+        backgroundColor: color,
+        borderRadius: 12,
       }}
     />
   );
 }
 
 export function PeopleSkeleton() {
+  const { colors } = useTheme();
   return (
     <View className="mt-lg" accessibilityLabel="Loading people">
-      <Bar height={14} width="35%" />
-      <Bar className="mt-sm" height={44} width="50%" />
-      <Bar className="mt-sm" height={16} width="60%" />
-      <Bar className="mt-xl" height={14} width="25%" />
-      <Bar className="mt-md" height={88} />
-      <Bar className="mt-sm" height={88} />
-      <Bar className="mt-sm" height={88} />
+      <Bar color={colors.border} height={14} width="35%" />
+      <Bar className="mt-sm" color={colors.border} height={44} width="50%" />
+      <Bar className="mt-sm" color={colors.border} height={16} width="60%" />
+      <Bar className="mt-xl" color={colors.border} height={14} width="25%" />
+      <Bar className="mt-md" color={colors.border} height={88} />
+      <Bar className="mt-sm" color={colors.border} height={88} />
+      <Bar className="mt-sm" color={colors.border} height={88} />
     </View>
   );
 }

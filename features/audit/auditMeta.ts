@@ -10,7 +10,10 @@ export function sanitizeAuditMetadata(
 const ACTION_LABELS: Record<AuditAction, string> = {
   ORG_CREATE: 'Created workspace',
   MEMBER_INVITE: 'Invited member',
+  MEMBER_INVITE_REVOKE: 'Withdrew invite',
   MEMBER_ACTIVATE: 'Member joined',
+  MEMBER_REMOVE: 'Removed member',
+  MEMBER_REACTIVATE: 'Reactivated member',
   CARD_CREATE: 'Created card',
   CARD_UPDATE: 'Updated card',
   CARD_DEACTIVATE: 'Deactivated card',

@@ -4,9 +4,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/features/auth/AuthProvider';
 import { useGoogleSignIn } from '@/features/auth/useGoogleSignIn';
-import { colors } from '@/theme/tokens';
+import { useTheme } from '@/features/theme/ThemeProvider';
 
 export default function LoginScreen() {
+  const { colors } = useTheme();
   const { user, loading, configured } = useAuth();
   const google = useGoogleSignIn();
   const insets = useSafeAreaInsets();

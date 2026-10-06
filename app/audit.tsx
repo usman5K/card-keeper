@@ -16,8 +16,8 @@ import {
 } from '@/features/audit/auditService';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { useOrg } from '@/features/org/OrgProvider';
+import { useTheme } from '@/features/theme/ThemeProvider';
 import type { AuditLogDoc } from '@/types/audit';
-import { colors } from '@/theme/tokens';
 
 function formatWhen(value: unknown) {
   if (!value) {
@@ -62,6 +62,7 @@ function metaSummary(item: AuditLogDoc) {
 }
 
 export default function AuditScreen() {
+  const { colors } = useTheme();
   const { user, loading: authLoading } = useAuth();
   const { orgId, member } = useOrg();
   const router = useRouter();

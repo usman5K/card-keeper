@@ -1,7 +1,11 @@
 import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { vars } from 'nativewind';
 
-import { a11y, colors } from '@/theme/tokens';
+import { AppButton } from '@/components/AppButton';
+import { SheetActions } from '@/components/SheetActions';
+import { useTheme } from '@/features/theme/ThemeProvider';
+import { themeCssVars } from '@/theme/tokens';
 
 type ConfirmSheetProps = {
   visible: boolean;
@@ -27,49 +31,47 @@ export function ConfirmSheet({
   onCancel,
 }: ConfirmSheetProps) {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onCancel}>
-      <View className="flex-1 justify-end bg-black/40">
+      <View style={[{ flex: 1 }, vars(themeCssVars(colors))]} className="flex-1 justify-end">
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Dismiss confirmation"
-          className="flex-1"
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}
           onPress={onCancel}
           disabled={busy}
         />
         <View
-          className="rounded-t-2xl bg-background px-md pt-lg"
-          style={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}>
-          <Text className="text-xl font-semibold text-ink">{title}</Text>
-          <Text className="mt-sm text-base text-muted">{body}</Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={confirmLabel}
-            accessibilityState={{ disabled: busy }}
-            className="mt-lg items-center rounded-lg px-md"
-            style={{
-              minHeight: a11y.minHit,
-              justifyContent: 'center',
-              backgroundColor: destructive ? colors.danger : colors.ink,
-              opacity: busy ? 0.6 : 1,
-            }}
-            disabled={busy}
-            onPress={onConfirm}>
-            <Text className="text-base font-semibold text-background">
-              {busy ? 'Working…' : confirmLabel}
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={cancelLabel}
-            accessibilityState={{ disabled: busy }}
-            className="mt-sm items-center rounded-lg border border-border px-md"
-            style={{ minHeight: a11y.minHit, justifyContent: 'center' }}
-            disabled={busy}
-            onPress={onCancel}>
-            <Text className="text-base font-semibold text-ink">{cancelLabel}</Text>
-          </Pressable>
+          style={{
+            backgroundColor: colors.background,
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            borderTopWidth: 1,
+            borderColor: colors.border,
+            paddingHorizontal: 16,
+            paddingTop: 20,
+            paddingBottom: Math.max(insets.bottom, 16) + 8,
+          }}>
+          <Text style={{ color: colors.ink, fontSize: 20, fontWeight: '700' }}>{title}</Text>
+          <Text style={{ color: colors.muted, fontSize: 16, marginTop: 8 }}>{body}</Text>
+          <View style={{ marginTop: 20 }}>
+            <SheetActions>
+              <AppButton
+                label={cancelLabel}
+                variant="secondary"
+                disabled={busy}
+                onPress={onCancel}
+              />
+              <AppButton
+                label={confirmLabel}
+                variant={destructive ? 'danger' : 'primary'}
+                busy={busy}
+                onPress={onConfirm}
+              />
+            </SheetActions>
+          </View>
         </View>
       </View>
     </Modal>

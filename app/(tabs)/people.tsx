@@ -1,15 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Info, Mail } from 'lucide-react-native';
 
+import { AppButton } from '@/components/AppButton';
 import { BalanceHero } from '@/components/BalanceHero';
+import { BottomSheet } from '@/components/BottomSheet';
+import { ChipRow } from '@/components/ChipRow';
 import { EmptyState } from '@/components/EmptyState';
 import { PeopleSkeleton } from '@/components/PeopleSkeleton';
 import { SettlementPaymentSheet } from '@/components/SettlementPaymentSheet';
+import { SheetActions } from '@/components/SheetActions';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { useOrg } from '@/features/org/OrgProvider';
-import { listActiveMembers, type OrgMemberDoc } from '@/features/org/orgService';
+import {
+  listActiveMembers,
+  listOrgInvites,
+  revokeInvite,
+  setMemberStatus,
+  type OrgInviteDoc,
+  type OrgMemberDoc,
+} from '@/features/org/orgService';
 import {
   settlementMethods,
   type SettlementInput,
@@ -22,7 +33,9 @@ import {
   type SettlementDoc,
 } from '@/features/settlements/settlementService';
 import { useSync } from '@/features/sync/SyncProvider';
-import { a11y, colors } from '@/theme/tokens';
+import { useTheme } from '@/features/theme/ThemeProvider';
+import { toast } from '@/features/toast/ToastProvider';
+import { a11y } from '@/theme/tokens';
 import { formatPkr, parsePkrInput } from '@/utils/money';
 import {
   assignedCardCountLabel,
@@ -33,21 +46,26 @@ import {
   sortPeopleByOutstanding,
   sumRecoverableOutstanding,
   type PersonFinance,
+  type PersonListItem,
 } from '@/utils/peopleDashboard';
 
+type PeopleFilter = 'All' | 'Invited' | 'Members';
+
+const FILTERS: PeopleFilter[] = ['All', 'Invited', 'Members'];
+
 export default function PeopleScreen() {
+  const { colors } = useTheme();
   const { user } = useAuth();
   const { orgId, orgName, member, inviteEmail } = useOrg();
   const { isOnline } = useSync();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const isOwner = member?.role === 'owner';
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<OrgMemberDoc[]>([]);
+  const [invites, setInvites] = useState<OrgInviteDoc[]>([]);
   const [finance, setFinance] = useState<Record<string, PersonFinance>>({});
   const [pending, setPending] = useState<SettlementDoc[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -56,10 +74,13 @@ export default function PeopleScreen() {
   const [method, setMethod] = useState<(typeof settlementMethods)[number]>('cash');
   const [notes, setNotes] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+  const [filter, setFilter] = useState<PeopleFilter>('All');
+  const [infoPerson, setInfoPerson] = useState<PersonListItem | null>(null);
 
   const loadLedger = useCallback(async () => {
     if (!orgId || !member || !user) {
       setMembers([]);
+      setInvites([]);
       setFinance({});
       setPending([]);
       setLoading(false);
@@ -87,8 +108,12 @@ export default function PeopleScreen() {
     for (const [id, row] of rows) {
       map[id] = row;
     }
-    const nextPending = isOwner ? await listPendingSettlements(orgId) : [];
+    const [nextPending, nextInvites] = await Promise.all([
+      isOwner ? listPendingSettlements(orgId) : Promise.resolve([] as SettlementDoc[]),
+      isOwner ? listOrgInvites(orgId) : Promise.resolve([] as OrgInviteDoc[]),
+    ]);
     setMembers(nextMembers);
+    setInvites(nextInvites.filter((item) => item.status === 'pending'));
     setFinance(map);
     setPending(nextPending);
   }, [orgId, member, user, isOwner]);
@@ -143,6 +168,14 @@ export default function PeopleScreen() {
     return user ? (finance[user.uid]?.outstanding ?? 0) : 0;
   }, [isOwner, listItems, finance, user]);
 
+  const showMembers = filter === 'All' || filter === 'Members';
+  const showInvites = isOwner && (filter === 'All' || filter === 'Invited');
+  const filteredEmpty =
+    !loading &&
+    !error &&
+    (showMembers ? listItems.length === 0 : true) &&
+    (showInvites ? invites.length === 0 : true);
+
   function openPayment(userId: string) {
     setPayUserId(userId);
     setAmountText('');
@@ -156,7 +189,6 @@ export default function PeopleScreen() {
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       const amount = parsePkrInput(amountText);
       const input: SettlementInput = {
@@ -167,14 +199,14 @@ export default function PeopleScreen() {
       };
       await createSettlement(orgId, user.uid, input, { role: member.role });
       setSheetOpen(false);
-      setMessage(
+      toast.success(
         member.role === 'owner'
           ? 'Settlement recorded and confirmed.'
           : 'Settlement submitted for owner confirmation.',
       );
       setReloadKey((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save settlement');
+      toast.error(err instanceof Error ? err.message : 'Could not save settlement');
     } finally {
       setBusy(false);
     }
@@ -185,13 +217,12 @@ export default function PeopleScreen() {
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       await confirmSettlement(orgId, item.id, user.uid);
-      setMessage('Settlement confirmed.');
+      toast.success('Settlement confirmed.');
       setReloadKey((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not confirm settlement');
+      toast.error(err instanceof Error ? err.message : 'Could not confirm settlement');
     } finally {
       setBusy(false);
     }
@@ -199,18 +230,52 @@ export default function PeopleScreen() {
 
   async function sendInvite() {
     if (!inviteEmailLooksValid(email)) {
-      setError('Enter a valid email');
+      toast.error('Enter a valid email');
       return;
     }
     setBusy(true);
-    setError(null);
-    setMessage(null);
     try {
+      const invited = email.trim().toLowerCase();
       await inviteEmail(email);
-      setMessage(`Invite sent to ${email.trim().toLowerCase()}`);
+      toast.success(`Invite sent to ${invited}`);
       setEmail('');
+      setFilter('Invited');
+      setReloadKey((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invite failed');
+      toast.error(err instanceof Error ? err.message : 'Invite failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function withdrawInvite(inviteId: string) {
+    if (!orgId || !user) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await revokeInvite(orgId, inviteId, user.uid);
+      toast.success('Invite withdrawn.');
+      setReloadKey((value) => value + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not withdraw invite');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeMember(memberId: string, label: string) {
+    if (!orgId || !user) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await setMemberStatus(orgId, memberId, 'removed', user.uid);
+      toast.success(`Removed ${label} from this workspace.`);
+      setInfoPerson(null);
+      setReloadKey((value) => value + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not remove member');
     } finally {
       setBusy(false);
     }
@@ -218,13 +283,20 @@ export default function PeopleScreen() {
 
   return (
     <ScrollView
-      className="flex-1 bg-background"
-      contentContainerStyle={{ paddingBottom: 40, paddingTop: insets.top }}>
-      <View className="px-md pt-lg">
-        <Text className="text-sm font-medium uppercase tracking-wide text-muted">
+      style={{ flex: 1, backgroundColor: colors.background }}
+      contentContainerStyle={{ paddingBottom: 40, paddingTop: 8 }}>
+      <View style={{ paddingHorizontal: 16 }}>
+        <Text
+          style={{
+            color: colors.muted,
+            fontSize: 13,
+            fontWeight: '600',
+            letterSpacing: 0.6,
+            textTransform: 'uppercase',
+          }}>
           {orgName ?? 'Workspace'}
         </Text>
-        <View className="mt-lg">
+        <View style={{ marginTop: 16 }}>
           <BalanceHero
             amount={loading ? null : recoverable}
             trusted
@@ -238,76 +310,55 @@ export default function PeopleScreen() {
           />
         </View>
         {!isOwner && user ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Record a payment"
-            className="mt-md items-center rounded-lg bg-ink px-md"
-            style={({ pressed }) => ({
-              minHeight: a11y.minHit,
-              justifyContent: 'center',
-              opacity: pressed ? 0.88 : 1,
-            })}
-            onPress={() => openPayment(user.uid)}>
-            <Text className="text-base font-semibold text-background">Record payment</Text>
-          </Pressable>
+          <View style={{ marginTop: 12 }}>
+            <AppButton label="Record payment" onPress={() => openPayment(user.uid)} />
+          </View>
         ) : null}
       </View>
 
       {error && !loading && listItems.length === 0 ? (
-        <View className="px-md pt-lg">
+        <View style={{ paddingHorizontal: 16, paddingTop: 24 }}>
           <EmptyState title="Could not load people" body={error} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Retry loading people"
-            className="mt-md items-center rounded-lg border border-border px-md"
-            style={{ minHeight: a11y.minHit, justifyContent: 'center' }}
-            onPress={() => {
-              setLoading(true);
-              setError(null);
-              setReloadKey((value) => value + 1);
-            }}>
-            <Text className="text-base font-medium text-ink">Try again</Text>
-          </Pressable>
+          <View style={{ marginTop: 12 }}>
+            <AppButton
+              label="Try again"
+              variant="secondary"
+              onPress={() => {
+                setLoading(true);
+                setError(null);
+                setReloadKey((value) => value + 1);
+              }}
+            />
+          </View>
         </View>
       ) : null}
-      {error && listItems.length > 0 ? (
-        <Text className="px-md pt-md text-sm" style={{ color: colors.danger }}>
-          {error}
-        </Text>
-      ) : null}
       {!isOnline ? (
-        <Text className="px-md pt-md text-sm" style={{ color: colors.offline }}>
+        <Text style={{ color: colors.offline, paddingHorizontal: 16, paddingTop: 12, fontSize: 14 }}>
           Offline. Outstanding amounts may be last known.
         </Text>
       ) : null}
-      {message ? <Text className="px-md pt-md text-sm text-online">{message}</Text> : null}
 
       {isOwner && pending.length > 0 ? (
-        <View className="mt-xl px-md">
-          <Text className="text-sm font-medium uppercase tracking-wide text-muted">
-            Pending confirmations
-          </Text>
+        <View style={{ marginTop: 24, paddingHorizontal: 16 }}>
+          <Text style={sectionLabel(colors.muted)}>Pending confirmations</Text>
           {pending.map((item) => {
             const person = members.find((m) => m.id === item.userId);
             return (
-              <View
-                key={item.id}
-                className="mt-md rounded-lg border border-border bg-surface px-md py-md">
-                <Text className="text-base font-semibold text-ink">
+              <View key={item.id} style={cardStyle(colors)}>
+                <Text style={{ color: colors.ink, fontSize: 16, fontWeight: '700' }}>
                   {formatPkr(item.amount)} · {settlementMethodLabel(item.method)}
                 </Text>
-                <Text className="mt-xs text-sm text-muted">
+                <Text style={{ color: colors.muted, fontSize: 14, marginTop: 4 }}>
                   {person ? personDisplayName(person) : item.userId}
                 </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Confirm settlement"
-                  className="mt-md items-center justify-center rounded-lg bg-accent px-md"
-                  style={{ minHeight: a11y.minHit }}
-                  disabled={busy}
-                  onPress={() => void approvePending(item)}>
-                  <Text className="text-sm font-semibold text-background">Confirm</Text>
-                </Pressable>
+                <View style={{ marginTop: 12 }}>
+                  <AppButton
+                    label="Confirm"
+                    compact
+                    disabled={busy}
+                    onPress={() => void approvePending(item)}
+                  />
+                </View>
               </View>
             );
           })}
@@ -315,98 +366,239 @@ export default function PeopleScreen() {
       ) : null}
 
       {isOwner ? (
-        <View className="mt-xl px-md">
-          <Text className="text-sm font-medium uppercase tracking-wide text-muted">
-            Invite member
+        <View style={{ marginTop: 24, paddingHorizontal: 16 }}>
+          <Text style={sectionLabel(colors.muted)}>Invite member</Text>
+          <Text style={{ color: colors.muted, fontSize: 14, marginTop: 4 }}>
+            They join when they sign in with the same Google email.
           </Text>
-          <TextInput
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            autoCorrect={false}
-            placeholder="name@email.com"
-            placeholderTextColor={colors.muted}
-            accessibilityLabel="Invite email"
-            className="mt-md rounded-lg border border-border bg-surface px-md py-md text-base text-ink"
-          />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Send invite"
-            className="mt-md items-center rounded-lg bg-ink px-md py-md"
-            disabled={busy || !email.trim()}
-            onPress={() => void sendInvite()}>
-            <Text className="text-base font-semibold text-background">
-              {busy ? 'Working…' : 'Send invite'}
-            </Text>
-          </Pressable>
+          <View
+            style={{
+              marginTop: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              minHeight: 56,
+              borderWidth: 1,
+              borderColor: colors.border,
+              backgroundColor: colors.surface,
+              borderRadius: 14,
+              paddingHorizontal: 14,
+              gap: 10,
+            }}>
+            <Mail color={colors.muted} size={20} />
+            <TextInput
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoCorrect={false}
+              placeholder="name@email.com"
+              placeholderTextColor={colors.muted}
+              accessibilityLabel="Invite email"
+              style={{
+                flex: 1,
+                color: colors.ink,
+                fontSize: 17,
+                paddingVertical: 16,
+                minHeight: 56,
+              }}
+            />
+          </View>
+          <View style={{ marginTop: 12 }}>
+            <AppButton
+              label="Send invite"
+              busy={busy}
+              disabled={!email.trim()}
+              onPress={() => void sendInvite()}
+            />
+          </View>
         </View>
       ) : null}
 
-      <View className="mt-xl px-md">
-        <Text className="text-sm font-medium uppercase tracking-wide text-muted">People</Text>
-        {loading ? (
-          <PeopleSkeleton />
-        ) : listItems.length === 0 && !error ? (
-          <EmptyState title="No members" body="Invite someone to share this ledger." />
-        ) : listItems.length === 0 ? null : (
-          listItems.map((person) => {
-            const openable = isOwner || person.id === user?.uid;
-            const body = (
-              <>
-                <View className="flex-row items-start justify-between">
-                  <View className="flex-1 pr-md">
-                    <Text className="text-lg font-semibold text-ink">
-                      {personDisplayName(person)}
+      <View style={{ marginTop: 28, paddingHorizontal: 16 }}>
+        <Text style={sectionLabel(colors.muted)}>People</Text>
+        {isOwner ? (
+          <View style={{ marginTop: 10 }}>
+            <ChipRow
+              options={FILTERS}
+              selected={filter}
+              onSelect={(value) => setFilter(value as PeopleFilter)}
+            />
+          </View>
+        ) : null}
+
+        {loading ? <PeopleSkeleton /> : null}
+
+        {!loading && filteredEmpty ? (
+          <EmptyState
+            title={
+              filter === 'Invited'
+                ? 'No pending invites'
+                : filter === 'Members'
+                  ? 'No members'
+                  : 'No people yet'
+            }
+            body={
+              filter === 'Invited'
+                ? 'Send an invite above to add someone.'
+                : 'Invite someone to share this ledger.'
+            }
+          />
+        ) : null}
+
+        {showInvites && !loading
+          ? invites.map((invite) => (
+              <View key={invite.id} style={[cardStyle(colors), { marginTop: 12 }]}>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}>
+                  <View style={{ flex: 1, paddingRight: 12 }}>
+                    <Text style={{ color: colors.ink, fontSize: 17, fontWeight: '700' }}>
+                      {invite.email}
                     </Text>
-                    <Text className="mt-xs text-sm text-muted">
-                      {person.email} · {person.role}
+                    <Text style={{ color: colors.offline, fontSize: 13, marginTop: 4, fontWeight: '600' }}>
+                      Invited
                     </Text>
                   </View>
-                  {person.outstanding != null ? (
-                    <Text
-                      className="text-xl font-bold text-ink"
-                      accessibilityLabel={`Outstanding ${formatPkr(person.outstanding)}`}>
-                      {formatPkr(person.outstanding)}
-                    </Text>
-                  ) : null}
+                  <AppButton
+                    label="Withdraw"
+                    variant="secondary"
+                    compact
+                    disabled={busy}
+                    onPress={() => void withdrawInvite(invite.id)}
+                  />
                 </View>
-                {person.outstanding != null ? (
-                  <Text className="mt-sm text-sm text-muted">
-                    Spent {formatPkr(person.fuelTotal ?? 0)} · Settled{' '}
-                    {formatPkr(person.settledTotal ?? 0)}
-                  </Text>
-                ) : (
-                  <Text className="mt-sm text-sm text-muted">
-                    {assignedCardCountLabel(person.assignedCardIds.length)}
-                  </Text>
-                )}
-              </>
-            );
+              </View>
+            ))
+          : null}
 
-            if (!openable) {
+        {showMembers && !loading
+          ? listItems.map((person) => {
+              const openable = isOwner || person.id === user?.uid;
               return (
-                <View
-                  key={person.id}
-                  className="mt-md rounded-lg border border-border bg-surface px-md py-md">
-                  {body}
+                <View key={person.id} style={[cardStyle(colors), { marginTop: 12 }]}>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Open ${personDisplayName(person)}`}
+                      disabled={!openable}
+                      style={{ flex: 1, paddingRight: 8, minHeight: a11y.minHit, justifyContent: 'center' }}
+                      onPress={() => {
+                        if (openable) {
+                          router.push(`/person/${person.id}`);
+                        }
+                      }}>
+                      <Text style={{ color: colors.ink, fontSize: 17, fontWeight: '700' }}>
+                        {personDisplayName(person)}
+                      </Text>
+                      {person.outstanding != null ? (
+                        <Text style={{ color: colors.muted, fontSize: 14, marginTop: 4 }}>
+                          Outstanding {formatPkr(person.outstanding)}
+                        </Text>
+                      ) : (
+                        <Text style={{ color: colors.muted, fontSize: 14, marginTop: 4 }}>
+                          {person.role}
+                        </Text>
+                      )}
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`More info for ${personDisplayName(person)}`}
+                      hitSlop={8}
+                      onPress={() => setInfoPerson(person)}
+                      style={({ pressed }) => ({
+                        width: 40,
+                        height: 40,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: pressed ? 0.7 : 1,
+                      })}>
+                      <Info color={colors.ink} size={18} />
+                    </Pressable>
+                  </View>
                 </View>
               );
-            }
-
-            return (
-              <Pressable
-                key={person.id}
-                accessibilityRole="button"
-                accessibilityLabel={`Open ${personDisplayName(person)}`}
-                className="mt-md rounded-lg border border-border bg-surface px-md py-md"
-                onPress={() => router.push(`/person/${person.id}`)}>
-                {body}
-              </Pressable>
-            );
-          })
-        )}
+            })
+          : null}
       </View>
+
+      <BottomSheet
+        visible={infoPerson != null}
+        title={infoPerson ? personDisplayName(infoPerson) : 'Person'}
+        onClose={() => setInfoPerson(null)}
+        footer={
+          infoPerson ? (
+            <SheetActions>
+              {(isOwner || infoPerson.id === user?.uid) ? (
+                <AppButton
+                  label="Open"
+                  variant="secondary"
+                  onPress={() => {
+                    const id = infoPerson.id;
+                    setInfoPerson(null);
+                    router.push(`/person/${id}`);
+                  }}
+                />
+              ) : (
+                <AppButton label="Close" variant="secondary" onPress={() => setInfoPerson(null)} />
+              )}
+              {isOwner && infoPerson.role !== 'owner' && infoPerson.id !== user?.uid ? (
+                <AppButton
+                  label="Remove"
+                  variant="danger"
+                  disabled={busy}
+                  onPress={() =>
+                    void removeMember(infoPerson.id, personDisplayName(infoPerson))
+                  }
+                />
+              ) : (
+                <AppButton label="Done" onPress={() => setInfoPerson(null)} />
+              )}
+            </SheetActions>
+          ) : undefined
+        }>
+        {infoPerson ? (
+          <View style={{ gap: 14 }}>
+            <InfoRow label="Email" value={infoPerson.email} colors={colors} />
+            <InfoRow label="Role" value={infoPerson.role} colors={colors} />
+            {infoPerson.outstanding != null ? (
+              <>
+                <InfoRow
+                  label="Outstanding"
+                  value={formatPkr(infoPerson.outstanding)}
+                  colors={colors}
+                />
+                <InfoRow
+                  label="Spent"
+                  value={formatPkr(infoPerson.fuelTotal ?? 0)}
+                  colors={colors}
+                />
+                <InfoRow
+                  label="Settled"
+                  value={formatPkr(infoPerson.settledTotal ?? 0)}
+                  colors={colors}
+                />
+              </>
+            ) : (
+              <InfoRow
+                label="Cards"
+                value={assignedCardCountLabel(infoPerson.assignedCardIds.length)}
+                colors={colors}
+              />
+            )}
+          </View>
+        ) : null}
+      </BottomSheet>
 
       <SettlementPaymentSheet
         visible={sheetOpen}
@@ -425,5 +617,46 @@ export default function PeopleScreen() {
         onClose={() => setSheetOpen(false)}
       />
     </ScrollView>
+  );
+}
+
+function sectionLabel(color: string) {
+  return {
+    color,
+    fontSize: 13,
+    fontWeight: '600' as const,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase' as const,
+  };
+}
+
+function cardStyle(colors: { border: string; surface: string }) {
+  return {
+    marginTop: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  };
+}
+
+function InfoRow({
+  label,
+  value,
+  colors,
+}: {
+  label: string;
+  value: string;
+  colors: { muted: string; ink: string };
+}) {
+  return (
+    <View>
+      <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '600', letterSpacing: 0.5 }}>
+        {label.toUpperCase()}
+      </Text>
+      <Text style={{ color: colors.ink, fontSize: 16, marginTop: 4 }}>{value}</Text>
+    </View>
   );
 }

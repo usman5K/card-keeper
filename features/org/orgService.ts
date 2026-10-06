@@ -287,3 +287,106 @@ export async function setMemberAssignedCards(
     updatedAt: serverTimestamp(),
   });
 }
+
+export type OrgInviteDoc = OrgInvite & { id: string };
+
+export async function listOrgInvites(orgId: string): Promise<OrgInviteDoc[]> {
+  const db = dbOrThrow();
+  const snap = await getDocs(collection(db, 'organizations', orgId, 'invites'));
+  return snap.docs
+    .map((item) => ({ id: item.id, ...(item.data() as OrgInvite) }))
+    .sort((a, b) => a.email.localeCompare(b.email));
+}
+
+export async function revokeInvite(orgId: string, inviteId: string, actorId: string) {
+  const db = dbOrThrow();
+  await updateDoc(doc(db, 'organizations', orgId, 'invites', inviteId), {
+    status: 'revoked',
+    updatedAt: serverTimestamp(),
+  });
+  await writeAuditLog(orgId, {
+    actorId,
+    action: 'MEMBER_INVITE_REVOKE',
+    entityType: 'invite',
+    entityId: inviteId,
+  });
+}
+
+export async function setMemberStatus(
+  orgId: string,
+  memberId: string,
+  status: 'active' | 'removed',
+  actorId: string,
+) {
+  const db = dbOrThrow();
+  const org = await getOrganization(orgId);
+  if (!org) {
+    throw new Error('Workspace not found');
+  }
+  if (memberId === org.ownerId) {
+    throw new Error('Cannot change the owner membership');
+  }
+  await updateDoc(doc(db, 'organizations', orgId, 'members', memberId), {
+    status,
+    updatedAt: serverTimestamp(),
+  });
+  await writeAuditLog(orgId, {
+    actorId,
+    action: status === 'removed' ? 'MEMBER_REMOVE' : 'MEMBER_REACTIVATE',
+    entityType: 'member',
+    entityId: memberId,
+    metadata: { status },
+  });
+}
+
+export type WorkspaceMembership = {
+  orgId: string;
+  orgName: string;
+  role: OrgMember['role'];
+};
+
+export async function listWorkspacesForEmail(email: string): Promise<WorkspaceMembership[]> {
+  const db = dbOrThrow();
+  const normalized = normalizeEmail(email);
+  try {
+    const snap = await getDocs(
+      query(
+        collectionGroup(db, 'members'),
+        where('email', '==', normalized),
+        where('status', '==', 'active'),
+      ),
+    );
+    const rows: WorkspaceMembership[] = [];
+    for (const item of snap.docs) {
+      const orgRef = item.ref.parent.parent;
+      if (!orgRef) {
+        continue;
+      }
+      const org = await getOrganization(orgRef.id);
+      if (!org) {
+        continue;
+      }
+      const member = item.data() as OrgMember;
+      rows.push({
+        orgId: org.id,
+        orgName: org.name,
+        role: member.role,
+      });
+    }
+    return rows.sort((a, b) => a.orgName.localeCompare(b.orgName));
+  } catch {
+    return [];
+  }
+}
+
+export async function switchActiveOrg(user: User, orgId: string) {
+  const membership = await getActiveMembership(user.uid, orgId);
+  if (!membership) {
+    throw new Error('You are not an active member of that workspace');
+  }
+  const db = dbOrThrow();
+  await updateDoc(doc(db, 'users', user.uid), {
+    activeOrgId: orgId,
+    updatedAt: serverTimestamp(),
+  });
+}

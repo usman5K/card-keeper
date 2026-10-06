@@ -180,7 +180,15 @@ service cloud.firestore {
               && request.resource.data.cardId in memberDoc(orgId).data.get('assignedCardIds', [])
             )
           );
-        allow update: if isOwner(orgId)
+        allow update: if (
+          // Client ack: PENDING -> SYNCED after Firestore accepts the write (no Cloud Functions).
+          isActiveMember(orgId)
+          && resource.data.type == 'FUEL'
+          && resource.data.syncStatus == 'PENDING'
+          && request.resource.data.syncStatus == 'SYNCED'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['syncStatus'])
+        ) || (
+          isOwner(orgId)
           && resource.data.syncStatus == 'CONFLICT'
           && resource.data.requiresReview == true
           && request.resource.data.requiresReview == false
@@ -195,7 +203,8 @@ service cloud.firestore {
           && request.resource.data.reviewedBy == uid()
           && request.resource.data.reviewAction in ['acknowledge', 'reverse', 'adjust']
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['requiresReview', 'reviewedBy', 'reviewedAt', 'reviewAction']);
+            .hasOnly(['requiresReview', 'reviewedBy', 'reviewedAt', 'reviewAction'])
+        );
         allow delete: if false;
       }
 
@@ -324,7 +333,8 @@ service cloud.firestore {
         allow create: if isActiveMember(orgId)
           && request.resource.data.actorId == uid()
           && request.resource.data.action in [
-            'ORG_CREATE', 'MEMBER_INVITE', 'MEMBER_ACTIVATE',
+            'ORG_CREATE', 'MEMBER_INVITE', 'MEMBER_INVITE_REVOKE',
+            'MEMBER_ACTIVATE', 'MEMBER_REMOVE', 'MEMBER_REACTIVATE',
             'CARD_CREATE', 'CARD_UPDATE', 'CARD_DEACTIVATE',
             'RECHARGE_CREATE', 'FUEL_CREATE', 'ADJUSTMENT_CREATE',
             'SETTLEMENT_CREATE', 'SETTLEMENT_CONFIRM',
@@ -350,6 +360,13 @@ service cloud.firestore {
       allow read: if signedIn()
         && resource.data.email == authEmail()
         && resource.data.status == 'pending';
+    }
+
+    // Collection-group membership lookup for workspace switcher.
+    match /{path=**}/members/{memberId} {
+      allow read: if signedIn()
+        && resource.data.email == authEmail()
+        && resource.data.status == 'active';
     }
   }
 }

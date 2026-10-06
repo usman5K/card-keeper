@@ -3,6 +3,7 @@ import { addPkr, assertIntegerPkr, sumPkr } from '@/utils/money';
 
 export type CardBalanceInput = {
   serverBalanceSnapshot: number | null;
+  projectedBalance?: number | null;
   status?: string;
 };
 
@@ -15,6 +16,8 @@ export type FuelAmountInput = {
 export type AvailableBalanceSummary = {
   total: number | null;
   knownCount: number;
+  snapshotCount: number;
+  projectedCount: number;
   unknownCount: number;
   cardCount: number;
 };
@@ -37,21 +40,30 @@ export type PendingAction = {
 export function sumAvailableBalance(cards: CardBalanceInput[]): AvailableBalanceSummary {
   const active = cards.filter((card) => card.status !== 'inactive');
   let total = 0;
-  let knownCount = 0;
+  let snapshotCount = 0;
+  let projectedCount = 0;
   let unknownCount = 0;
 
   for (const card of active) {
-    if (card.serverBalanceSnapshot == null) {
-      unknownCount += 1;
+    if (card.serverBalanceSnapshot != null) {
+      total = addPkr(total, assertIntegerPkr(card.serverBalanceSnapshot, 'card balance'));
+      snapshotCount += 1;
       continue;
     }
-    total = addPkr(total, assertIntegerPkr(card.serverBalanceSnapshot, 'card balance'));
-    knownCount += 1;
+    if (card.projectedBalance != null) {
+      total = addPkr(total, assertIntegerPkr(card.projectedBalance, 'projected balance'));
+      projectedCount += 1;
+      continue;
+    }
+    unknownCount += 1;
   }
 
+  const knownCount = snapshotCount + projectedCount;
   return {
     total: knownCount === 0 ? null : total,
     knownCount,
+    snapshotCount,
+    projectedCount,
     unknownCount,
     cardCount: active.length,
   };
@@ -177,8 +189,14 @@ export function balanceCaption(input: {
     summary.cardCount === 1
       ? '1 card'
       : `${summary.cardCount} cards`;
+  if (summary.snapshotCount === 0 && summary.projectedCount > 0) {
+    return `Estimated from ledger across ${scope}`;
+  }
   if (!trusted) {
     return `Last known across ${scope}, not final`;
+  }
+  if (summary.projectedCount > 0) {
+    return `Across ${scope}, partly estimated`;
   }
   if (summary.unknownCount > 0) {
     return `Across ${summary.knownCount} of ${summary.cardCount} cards with known balance`;
