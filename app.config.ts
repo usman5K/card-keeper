@@ -74,6 +74,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     experiments: {
       typedRoutes: true,
     },
+    runtimeVersion: {
+      policy: 'appVersion',
+    },
+    updates: {
+      url: 'https://u.expo.dev/be580c22-64b4-49ff-ae1e-6351c5e68233',
+    },
     owner: 'wiznoid',
     extra: {
       appVariant,
