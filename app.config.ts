@@ -74,8 +74,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     experiments: {
       typedRoutes: true,
     },
+    owner: 'wiznoid',
     extra: {
       appVariant,
+      eas: {
+        projectId: 'be580c22-64b4-49ff-ae1e-6351c5e68233',
+      },
     },
   };
 };
