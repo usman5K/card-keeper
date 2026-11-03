@@ -2,11 +2,10 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Pressable,
   Text,
   View,
 } from 'react-native';
-import { Redirect, Stack, useRouter } from 'expo-router';
+import { Redirect, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/components/EmptyState';
@@ -65,7 +64,6 @@ export default function AuditScreen() {
   const { colors } = useTheme();
   const { user, loading: authLoading } = useAuth();
   const { orgId, member, ready: orgReady } = useOrg();
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const isOwner = member?.role === 'owner';
   const [items, setItems] = useState<AuditLogDoc[]>([]);
@@ -138,7 +136,7 @@ export default function AuditScreen() {
           ListEmptyComponent={
             <EmptyState
               title="No audit events yet"
-              body="Financial and membership actions will appear here."
+              body="New fuel, recharges, cards, invites, and PIN actions appear here. Older activity from before audit logging may be missing."
             />
           }
           ListHeaderComponent={

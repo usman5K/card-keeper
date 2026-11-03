@@ -1,7 +1,7 @@
 {
   "name": "fuel-ledger",
   "main": "expo-router/entry",
-  "version": "1.0.0",
+  "version": "0.1.1",
   "private": true,
   "scripts": {
     "start": "expo start",
@@ -45,6 +45,7 @@
     "expo-splash-screen": "~57.0.9",
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.3",
+    "expo-updates": "~57.0.26",
     "expo-web-browser": "~57.0.3",
     "firebase": "^12.19.0",
     "lucide-react-native": "^1.52.0",

@@ -109,6 +109,20 @@ await assertSucceeds(getDoc(doc(member.firestore(), 'organizations/org1/cards/ca
 await assertSucceeds(getDoc(doc(owner.firestore(), 'organizations/org1/cards/card1')));
 
 await assertSucceeds(
+  updateDoc(doc(member.firestore(), 'organizations/org1/cards/card1'), {
+    serverBalanceSnapshot: 4200,
+    serverBalanceUpdatedAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  }),
+);
+await assertFails(
+  updateDoc(doc(member.firestore(), 'organizations/org1/cards/card1'), {
+    name: 'Hacked',
+    serverBalanceSnapshot: 1,
+  }),
+);
+
+await assertSucceeds(
   setDoc(doc(owner.firestore(), 'organizations/org1/cards/card2'), {
     name: 'Other',
     status: 'active',

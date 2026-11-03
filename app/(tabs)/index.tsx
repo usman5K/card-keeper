@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -25,7 +25,10 @@ import {
   reverseFuelTransaction,
 } from '@/features/adjustments/adjustmentService';
 import { useAuth } from '@/features/auth/AuthProvider';
-import { projectBalancesForCards } from '@/features/balance/balanceService';
+import {
+  persistProjectedSnapshots,
+  projectBalancesForCards,
+} from '@/features/balance/balanceService';
 import { listAllCards, listVisibleCards } from '@/features/cards/cardService';
 import {
   createFuelTransaction,
@@ -120,6 +123,8 @@ export default function HomeScreen() {
   const [reversedIds, setReversedIds] = useState<Set<string>>(new Set());
   const [reloadKey, setReloadKey] = useState(0);
   const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
+  const hasHomeData = useRef(false);
+  const loadedOrgId = useRef<string | null>(null);
 
   useEffect(() => {
     if (!orgReady) {
@@ -128,6 +133,8 @@ export default function HomeScreen() {
 
     if (!orgId || !member || !user) {
       const timer = setTimeout(() => {
+        hasHomeData.current = false;
+        loadedOrgId.current = null;
         setTxs([]);
         setCards([]);
         setProjectedByCard({});
@@ -142,10 +149,17 @@ export default function HomeScreen() {
       return () => clearTimeout(timer);
     }
 
+    if (loadedOrgId.current !== orgId) {
+      hasHomeData.current = false;
+      loadedOrgId.current = orgId;
+    }
+
     let cancelled = false;
     const timer = setTimeout(() => {
       void (async () => {
-        setLoading(true);
+        if (!hasHomeData.current) {
+          setLoading(true);
+        }
         try {
           const [nextCards, nextTxs, nextPeople, pinRows, pendingSettlements] = await Promise.all([
             isOwner ? listAllCards(orgId) : listVisibleCards(orgId, member),
@@ -182,6 +196,7 @@ export default function HomeScreen() {
           setError(null);
           setCardId((current) => current ?? activeCards[0]?.id ?? null);
           setUserId((current) => current ?? user.uid);
+          hasHomeData.current = true;
           setLoading(false);
 
           const needsProjection = activeCards
@@ -213,7 +228,29 @@ export default function HomeScreen() {
             return;
           }
 
-          setProjectedByCard(projectedResult.projected);
+          let projected = projectedResult.projected;
+          if (isOnline && Object.keys(projected).length > 0) {
+            const written = await persistProjectedSnapshots(orgId, projected);
+            if (written.length > 0 && !cancelled) {
+              const writtenSet = new Set(written);
+              setCards((current) =>
+                current.map((card) =>
+                  writtenSet.has(card.id) && projected[card.id] != null
+                    ? { ...card, serverBalanceSnapshot: projected[card.id] }
+                    : card,
+                ),
+              );
+              projected = Object.fromEntries(
+                Object.entries(projected).filter(([cardId]) => !writtenSet.has(cardId)),
+              );
+            }
+          }
+
+          if (cancelled) {
+            return;
+          }
+
+          setProjectedByCard(projected);
           setBalanceHint(projectedResult.hint);
           setOutstandingTotal(outstanding);
           setReversedIds(reversed);
@@ -230,7 +267,7 @@ export default function HomeScreen() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [orgReady, orgId, member, user, isOwner, reloadKey]);
+  }, [orgReady, orgId, member, user, isOwner, reloadKey, isOnline]);
 
   useFocusEffect(
     useCallback(() => {

@@ -8,7 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Redirect, Stack, useRouter } from 'expo-router';
+import { Redirect, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ConfirmSheet } from '@/components/ConfirmSheet';
@@ -40,7 +40,6 @@ export default function ConflictsScreen() {
   const { user } = useAuth();
   const { orgId, member, ready: orgReady } = useOrg();
   const { refresh: refreshSync } = useSync();
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const isOwner = member?.role === 'owner';
   const [items, setItems] = useState<ConflictFuelDoc[]>([]);

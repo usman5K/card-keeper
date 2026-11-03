@@ -1,6 +1,6 @@
 # FuelLedger
 
-Local-first shared fuel-card ledger (repo: card-keeper).
+Local-first shared fuel-card ledger (repo: card-keeper). App version **0.1.1**.
 
 ## Setup
 

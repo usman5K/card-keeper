@@ -104,3 +104,28 @@ export async function listRecentFuelTransactions(
     ...(item.data() as FuelTransaction),
   }));
 }
+
+export async function listFuelForCard(
+  orgId: string,
+  cardId: string,
+  options: { userId?: string; max?: number } = {},
+) {
+  const max = options.max ?? 80;
+  const snap = await getDocs(
+    query(
+      collection(dbOrThrow(), 'organizations', orgId, 'transactions'),
+      where('type', '==', 'FUEL'),
+      where('cardId', '==', cardId),
+      orderBy('occurredAt', 'desc'),
+      limit(options.userId ? Math.max(max * 3, 120) : max),
+    ),
+  );
+  const rows = snap.docs.map((item) => ({
+    id: item.id,
+    ...(item.data() as FuelTransaction),
+  }));
+  if (!options.userId) {
+    return rows;
+  }
+  return rows.filter((item) => item.userId === options.userId).slice(0, max);
+}

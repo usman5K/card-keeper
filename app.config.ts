@@ -35,7 +35,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name,
     slug: 'fuel-ledger',
-    version: '1.0.0',
+    version: '0.1.1',
     orientation: 'portrait',
     icon: './assets/images/icon.png',
     scheme: 'fuelledger',
@@ -74,8 +74,18 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     experiments: {
       typedRoutes: true,
     },
+    runtimeVersion: {
+      policy: 'appVersion',
+    },
+    updates: {
+      url: 'https://u.expo.dev/be580c22-64b4-49ff-ae1e-6351c5e68233',
+    },
+    owner: 'wiznoid',
     extra: {
       appVariant,
+      eas: {
+        projectId: 'be580c22-64b4-49ff-ae1e-6351c5e68233',
+      },
     },
   };
 };
