@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -11,6 +11,7 @@ import { useFocusEffect } from 'expo-router';
 
 import { AmountField } from '@/components/AmountField';
 import { AppButton } from '@/components/AppButton';
+import { BalanceHero } from '@/components/BalanceHero';
 import { BottomSheet } from '@/components/BottomSheet';
 import { CardListItem } from '@/components/CardListItem';
 import { CardsSkeleton } from '@/components/CardsSkeleton';
@@ -25,14 +26,22 @@ import {
   type AdjustmentDoc,
 } from '@/features/adjustments/adjustmentService';
 import { useAuth } from '@/features/auth/AuthProvider';
-import { projectBalancesForCards } from '@/features/balance/balanceService';
+import {
+  persistProjectedSnapshots,
+  projectBalancesForCards,
+} from '@/features/balance/balanceService';
 import {
   createCard,
   listVisibleCards,
   updateCard,
 } from '@/features/cards/cardService';
+import {
+  listFuelForCard,
+  type FuelTransactionDoc,
+} from '@/features/fuel/fuelService';
 import { orgCapabilities } from '@/features/org/capabilities';
 import { useOrg } from '@/features/org/OrgProvider';
+import { useSync } from '@/features/sync/SyncProvider';
 import { useTheme } from '@/features/theme/ThemeProvider';
 import { toast } from '@/features/toast/ToastProvider';
 import {
@@ -54,12 +63,14 @@ import {
 } from '@/features/recharges/rechargeService';
 import { a11y } from '@/theme/tokens';
 import type { FuelCardDoc } from '@/types/card';
+import { coerceDate } from '@/utils/dates';
 import { friendlyFirestoreMessage } from '@/utils/firestoreErrors';
 import { formatPkr, parsePkrInput } from '@/utils/money';
 
 type TimelineItem =
   | { kind: 'recharge'; occurredAt: string; item: RechargeDoc }
-  | { kind: 'adjustment'; occurredAt: string; item: AdjustmentDoc };
+  | { kind: 'adjustment'; occurredAt: string; item: AdjustmentDoc }
+  | { kind: 'fuel'; occurredAt: string; item: FuelTransactionDoc };
 
 type PendingConfirm = {
   title: string;
@@ -69,9 +80,14 @@ type PendingConfirm = {
   run: () => Promise<void>;
 };
 
+function timelineSortKey(value: string) {
+  return coerceDate(value)?.getTime() ?? 0;
+}
+
 export default function CardsScreen() {
   const { user } = useAuth();
   const { ready: orgReady, orgId, member, refresh, refreshMembership } = useOrg();
+  const { isOnline, balanceTrusted } = useSync();
   const { colors } = useTheme();
   const caps = orgCapabilities(member?.role);
   const isOwner = caps.isOwner;
@@ -80,6 +96,8 @@ export default function CardsScreen() {
   const [openingCardIds, setOpeningCardIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hasCardsData = useRef(false);
+  const loadedOrgId = useRef<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<FuelCardDoc | null>(null);
   const [name, setName] = useState('');
@@ -121,6 +139,8 @@ export default function CardsScreen() {
 
     if (!orgId || !member) {
       const timer = setTimeout(() => {
+        hasCardsData.current = false;
+        loadedOrgId.current = null;
         setCards([]);
         setBalances({});
         setOpeningCardIds(new Set());
@@ -129,9 +149,16 @@ export default function CardsScreen() {
       return () => clearTimeout(timer);
     }
 
+    if (loadedOrgId.current !== orgId) {
+      hasCardsData.current = false;
+      loadedOrgId.current = orgId;
+    }
+
     let cancelled = false;
     const timer = setTimeout(() => {
-      setLoading(true);
+      if (!hasCardsData.current) {
+        setLoading(true);
+      }
       void (async () => {
         try {
           const next = await listVisibleCards(orgId, member);
@@ -141,6 +168,7 @@ export default function CardsScreen() {
           next.sort((a, b) => a.name.localeCompare(b.name));
           setCards(next);
           setError(null);
+          hasCardsData.current = true;
 
           const needsProjection = next
             .filter((card) => card.serverBalanceSnapshot == null)
@@ -170,10 +198,32 @@ export default function CardsScreen() {
           if (cancelled) {
             return;
           }
+
+          let nextProjected = projected;
+          if (isOnline && Object.keys(projected).length > 0) {
+            const written = await persistProjectedSnapshots(orgId, projected);
+            if (written.length > 0 && !cancelled) {
+              const writtenSet = new Set(written);
+              setCards((current) =>
+                current.map((card) =>
+                  writtenSet.has(card.id) && projected[card.id] != null
+                    ? { ...card, serverBalanceSnapshot: projected[card.id] }
+                    : card,
+                ),
+              );
+              for (const cardId of written) {
+                snapshotBalances[cardId] = projected[cardId];
+              }
+              nextProjected = Object.fromEntries(
+                Object.entries(projected).filter(([cardId]) => !writtenSet.has(cardId)),
+              );
+            }
+          }
+
           const nextBalances: Record<string, number> = { ...snapshotBalances };
           for (const card of next) {
-            if (nextBalances[card.id] == null && projected[card.id] != null) {
-              nextBalances[card.id] = projected[card.id];
+            if (nextBalances[card.id] == null && nextProjected[card.id] != null) {
+              nextBalances[card.id] = nextProjected[card.id];
             }
           }
           setBalances(nextBalances);
@@ -201,7 +251,7 @@ export default function CardsScreen() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [orgReady, orgId, member, reloadKey, user]);
+  }, [orgReady, orgId, member, reloadKey, user, isOnline]);
 
   useFocusEffect(
     useCallback(() => {
@@ -300,14 +350,17 @@ export default function CardsScreen() {
   }
 
   async function loadTimeline(card: FuelCardDoc) {
-    if (!orgId) {
+    if (!orgId || !user) {
       return;
     }
     setTimelineLoading(true);
     try {
-      const [recharges, adjustments] = await Promise.all([
+      const [recharges, adjustments, fuels] = await Promise.all([
         listRechargesForCard(orgId, card.id),
         listAdjustmentsForCard(orgId, card.id),
+        listFuelForCard(orgId, card.id, {
+          userId: isOwner ? undefined : user.uid,
+        }),
       ]);
       const linked = new Set(
         adjustments
@@ -329,11 +382,16 @@ export default function CardsScreen() {
           occurredAt: String(item.occurredAt ?? ''),
           item,
         })),
+        ...fuels.map((item) => ({
+          kind: 'fuel' as const,
+          occurredAt: String(item.occurredAt ?? ''),
+          item,
+        })),
       ];
-      merged.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+      merged.sort((a, b) => timelineSortKey(b.occurredAt) - timelineSortKey(a.occurredAt));
       setTimeline(merged);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not load card activity');
+      toast.error(friendlyFirestoreMessage(err, 'Could not load card activity'));
       setTimeline([]);
       setReversedIds(new Set());
     } finally {
@@ -681,6 +739,7 @@ export default function CardsScreen() {
                     : undefined
                 }
                 onAddOpening={needsOpening ? () => openOpening(item) : undefined}
+                onRetryBalance={balance == null ? reload : undefined}
               />
             );
           }}
@@ -798,10 +857,34 @@ export default function CardsScreen() {
           setHistoryCard(null);
           setTimeline([]);
         }}>
+        {historyCard ? (
+          <View className="mb-md">
+            <BalanceHero
+              amount={
+                balances[historyCard.id] ?? historyCard.serverBalanceSnapshot ?? null
+              }
+              trusted={
+                balanceTrusted && historyCard.serverBalanceSnapshot != null
+              }
+              label="Available"
+              caption={
+                historyCard.serverBalanceSnapshot == null &&
+                balances[historyCard.id] != null
+                  ? 'Estimated from ledger'
+                  : undefined
+              }
+            />
+            {!isOwner ? (
+              <Text className="mt-sm text-sm text-muted">
+                Showing your fuel plus card recharges and adjustments.
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
         {timelineLoading ? (
           <ActivityIndicator className="mt-md" color={colors.accent} />
         ) : timeline.length === 0 ? (
-          <Text className="mt-sm text-base text-muted">No recharges or adjustments yet.</Text>
+          <Text className="mt-sm text-base text-muted">No fuel, recharges, or adjustments yet.</Text>
         ) : (
           timeline.map((entry) => {
             if (entry.kind === 'recharge') {
@@ -831,6 +914,23 @@ export default function CardsScreen() {
                       </Text>
                     </Pressable>
                   ) : null}
+                </View>
+              );
+            }
+
+            if (entry.kind === 'fuel') {
+              const item = entry.item;
+              return (
+                <View key={`f-${item.id}`} className="mt-sm border-b border-border py-sm">
+                  <Text className="text-base font-semibold text-ink">
+                    {formatPkr(item.amount)}
+                  </Text>
+                  <Text className="text-sm text-muted">
+                    Fuel · {item.station}
+                    {item.area ? ` · ${item.area}` : ''}
+                    {item.syncStatus === 'PENDING' ? ' · pending sync' : ''}
+                    {item.requiresReview ? ' · needs review' : ''}
+                  </Text>
                 </View>
               );
             }

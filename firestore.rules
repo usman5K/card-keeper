@@ -136,9 +136,19 @@ service cloud.firestore {
           && request.resource.data.last4 is string
           && request.resource.data.status in ['active', 'inactive']
           && cardHasNoPinFields();
-        allow update: if isOwner(orgId)
+        allow update: if (
+          isOwner(orgId)
           && request.resource.data.status in ['active', 'inactive']
-          && cardHasNoPinFields();
+          && cardHasNoPinFields()
+        ) || (
+          // Spark fallback: persist client-projected balance when Functions are unavailable.
+          isAssignedCard(orgId, cardId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['serverBalanceSnapshot', 'serverBalanceUpdatedAt', 'updatedAt'])
+          && request.resource.data.serverBalanceSnapshot is int
+          && request.resource.data.status == resource.data.status
+          && cardHasNoPinFields()
+        );
         allow delete: if false;
 
         // v1 plaintext PIN; isolated from card reads. Phase 2: encrypted/KMS.

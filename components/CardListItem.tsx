@@ -26,6 +26,7 @@ type Props = {
   onHistory: () => void;
   onAddRecharge?: () => void;
   onAddOpening?: () => void;
+  onRetryBalance?: () => void;
 };
 
 export function CardListItem({
@@ -40,6 +41,7 @@ export function CardListItem({
   onHistory,
   onAddRecharge,
   onAddOpening,
+  onRetryBalance,
 }: Props) {
   const { colors } = useTheme();
   const active = card.status === 'active';
@@ -114,9 +116,22 @@ export function CardListItem({
               {balance == null ? 'Rs —' : formatPkr(balance)}
             </Text>
             {balance == null ? (
-              <Text style={{ color: colors.offline, fontSize: 12, marginTop: 4 }}>
-                Balance unavailable · pull to refresh later
-              </Text>
+              <View style={{ marginTop: 4 }}>
+                <Text style={{ color: colors.offline, fontSize: 12 }}>
+                  Balance unavailable
+                </Text>
+                {onRetryBalance ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Retry balance for ${card.name}`}
+                    onPress={onRetryBalance}
+                    style={{ minHeight: a11y.minHit, justifyContent: 'center' }}>
+                    <Text style={{ color: colors.accent, fontSize: 13, fontWeight: '600' }}>
+                      Retry
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
             ) : balanceEstimated ? (
               <Text style={{ color: colors.offline, fontSize: 12, marginTop: 4 }}>
                 Estimated from ledger

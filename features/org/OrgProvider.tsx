@@ -184,8 +184,14 @@ export function OrgProvider({ children }: PropsWithChildren) {
         if (!user) {
           throw new Error('Not signed in');
         }
-        await switchActiveOrg(user, nextOrgId);
-        await refresh();
+        setReady(false);
+        try {
+          await switchActiveOrg(user, nextOrgId);
+          await refresh();
+        } catch (err) {
+          setReady(true);
+          throw err;
+        }
       },
     }),
     [

@@ -7,6 +7,7 @@ import {
   where,
 } from 'firebase/firestore';
 
+import { writeBalanceSnapshot } from '@/features/cards/cardService';
 import { getFirestoreDb } from '@/firebase/firestore';
 import type { Adjustment, FuelTransaction, Recharge, SyncStatus } from '@/types/ledger';
 import { projectCardBalance } from '@/utils/balance';
@@ -124,4 +125,22 @@ export async function projectBalancesForCards(
     }
   }
   return out;
+}
+
+export async function persistProjectedSnapshots(
+  orgId: string,
+  projected: Record<string, number>,
+): Promise<string[]> {
+  const written: string[] = [];
+  await Promise.all(
+    Object.entries(projected).map(async ([cardId, balance]) => {
+      try {
+        await writeBalanceSnapshot(orgId, cardId, balance);
+        written.push(cardId);
+      } catch {
+        // Best-effort Spark fallback; UI can keep estimated values.
+      }
+    }),
+  );
+  return written;
 }

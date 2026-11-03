@@ -35,7 +35,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name,
     slug: 'fuel-ledger',
-    version: '1.0.0',
+    version: '0.1.1',
     orientation: 'portrait',
     icon: './assets/images/icon.png',
     scheme: 'fuelledger',

@@ -123,6 +123,18 @@ export async function updateCard(
   });
 }
 
+export async function writeBalanceSnapshot(
+  orgId: string,
+  cardId: string,
+  balance: number,
+) {
+  await updateDoc(doc(dbOrThrow(), 'organizations', orgId, 'cards', cardId), {
+    serverBalanceSnapshot: balance,
+    serverBalanceUpdatedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function getCard(orgId: string, cardId: string) {
   const snap = await getDoc(doc(dbOrThrow(), 'organizations', orgId, 'cards', cardId));
   if (!snap.exists()) {
